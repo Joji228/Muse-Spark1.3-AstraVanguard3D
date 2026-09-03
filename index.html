@@ -1,0 +1,2367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunwarden: Solaris Rescue 3D — Superhero Platformer</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; background:#020617; font-family:'Segoe UI',system-ui,Arial,sans-serif; }
+  #app { position:fixed; inset:0; }
+  #game-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:none; }
+  .overlay, .overlay * { cursor:default; }
+  /* cinematic vignette + top glow */
+  #vignette { position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,10,.5) 100%); }
+  #topglow { position:absolute; top:0; left:0; right:0; height:120px; pointer-events:none;
+    background:linear-gradient(to bottom, rgba(0,0,20,.55), transparent); }
+  /* HUD */
+  button.bigbtn, button.ghostbtn, button.tbtn, button.utilbtn { font-family:inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible {
+    outline:3px solid #ffd700; outline-offset:2px;
+  }
+  #hud { position:absolute; top:14px; left:16px; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+  .bar { width:min(300px,32vw); background:rgba(2,6,23,.62); border:1px solid rgba(255,255,255,.14);
+    border-radius:10px; padding:5px 8px; backdrop-filter:blur(6px); }
+  .bar .track { height:12px; border-radius:7px; background:rgba(255,255,255,.12); overflow:hidden; margin-top:4px; }
+  .bar .fill { height:100%; width:100%; border-radius:7px; transition:width .12s linear; }
+  #hp-fill { background:linear-gradient(90deg,#ef4444,#fca5a5); }
+  #fl-fill { background:linear-gradient(90deg,#0284c7,#38bdf8); }
+  #ht-fill { background:linear-gradient(90deg,#ea580c,#fde047); }
+  #bo-fill { background:linear-gradient(90deg,#7c3aed,#c4b5fd); }
+  .bar label { font-size:12px; font-weight:700; color:#fff; letter-spacing:.5px; }
+  #score-panel { position:absolute; top:14px; right:16px; text-align:right; pointer-events:none;
+    background:rgba(2,6,23,.62); border:1px solid rgba(255,215,0,.3); border-radius:12px;
+    padding:10px 16px; backdrop-filter:blur(6px); }
+  #score-panel .score { color:#ffd700; font-weight:900; font-size:clamp(16px,2vw,24px); }
+  #score-panel .meta { color:#e2e8f0; font-size:13px; font-weight:600; margin-top:2px; }
+  #progress { position:absolute; top:14px; left:50%; transform:translateX(-50%); width:min(360px,38vw);
+    background:rgba(2,6,23,.62); border-radius:12px; padding:8px 12px; pointer-events:none; backdrop-filter:blur(6px); }
+  #progress .track { height:8px; background:rgba(255,255,255,.15); border-radius:5px; overflow:hidden; }
+  #progress .fill { height:100%; width:0%; background:#4ade80; border-radius:5px; }
+  #progress .lbl { font-size:11px; color:#fff; text-align:center; margin-top:3px; }
+  #objectives { position:absolute; top:86px; left:50%; transform:translateX(-50%); display:flex; gap:8px;
+    pointer-events:none; }
+  .obj { background:rgba(2,6,23,.62); border:1px solid rgba(255,255,255,.16); border-radius:20px;
+    color:#e2e8f0; font-size:12px; font-weight:700; padding:5px 12px; white-space:nowrap; backdrop-filter:blur(6px); }
+  .obj.done { border-color:#4ade80; color:#4ade80; }
+  .obj.open { border-color:#ffd700; color:#ffd700; box-shadow:0 0 12px rgba(255,215,0,.35); }
+  #bossbar { position:absolute; top:126px; left:50%; transform:translateX(-50%); width:min(460px,60vw);
+    display:none; pointer-events:none; }
+  #bossbar .name { text-align:center; color:#fca5a5; font-weight:900; font-size:13px; letter-spacing:2px;
+    text-shadow:0 1px 0 #000; margin-bottom:4px; }
+  #bossbar .track { height:14px; border-radius:8px; background:rgba(2,6,23,.7);
+    border:1px solid rgba(239,68,68,.6); overflow:hidden; }
+  #bossbar .fill { height:100%; width:100%; background:linear-gradient(90deg,#7f1d1d,#ef4444); }
+  #banner { position:absolute; top:32%; left:50%; transform:translate(-50%,-50%) scale(.9); max-width:88vw;
+    text-align:center; font-size:clamp(18px,3vw,34px); font-weight:900; color:#fff; opacity:0;
+    text-shadow:0 2px 0 #000, 0 0 24px rgba(59,130,246,.8); pointer-events:none; transition:opacity .25s, transform .25s; }
+  #banner.show { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  #banner.warn { color:#fca5a5; text-shadow:0 2px 0 #000, 0 0 24px rgba(239,68,68,.8); }
+  #banner.good { color:#4ade80; text-shadow:0 2px 0 #000, 0 0 24px rgba(34,197,94,.8); }
+  /* crosshair follows the mouse (positioned by JS); hidden until play */
+  #cross { position:absolute; left:0; top:0; width:26px; height:26px; transform:translate(-50%,-50%);
+    pointer-events:none; transition:transform .08s; display:none; z-index:5; }
+  #cross:before, #cross:after { content:''; position:absolute; background:rgba(255,255,255,.9);
+    box-shadow:0 0 6px rgba(255,60,40,.9); }
+  #cross:before { left:12px; top:2px; width:2px; height:22px; }
+  #cross:after { top:12px; left:2px; height:2px; width:22px; }
+  #cross .ring { position:absolute; inset:0; border:2px solid rgba(255,90,60,.9); border-radius:50%; }
+  #cross.firing { transform:translate(-50%,-50%) scale(1.35); }
+  #cross.locked .ring { border-color:#ffd700; box-shadow:0 0 10px rgba(255,215,0,.9); }
+  #cross.locked:before, #cross.locked:after { background:#ffd700; }
+  /* hint */
+  #hint { position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    background:rgba(2,6,23,.55); padding:7px 16px; border-radius:20px; font-size:12px; color:#e2e8f0;
+    white-space:nowrap; pointer-events:none; backdrop-filter:blur(6px); }
+  #hint b { color:#ffd700; }
+  #title-tag { position:absolute; bottom:12px; left:16px; color:#ffd700; font-weight:900; letter-spacing:2px;
+    font-size:14px; text-shadow:0 2px 0 #7f1d1d; pointer-events:none; }
+  /* overlays */
+  .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(3,7,22,.8); backdrop-filter:blur(8px); z-index:10; }
+  .card { text-align:center; max-width:min(640px,92vw); padding:36px 44px; border-radius:20px;
+    background:rgba(10,16,38,.9); border:1px solid rgba(255,215,0,.35);
+    box-shadow:0 0 80px rgba(59,130,246,.35); max-height:92dvh; overflow:auto; }
+  .touch-only { display:none; }
+  body.touch .touch-only { display:block; }
+  body.touch .kb-only { display:none; }
+  .card h1 { color:#ffd700; font-size:clamp(26px,4vw,46px); font-weight:900; letter-spacing:1px;
+    text-shadow:0 3px 0 #7f1d1d, 0 0 30px rgba(255,60,40,.5); }
+  .card h2 { color:#4ade80; font-size:clamp(24px,3.5vw,40px); margin-bottom:8px; }
+  .card p { color:#cbd5e1; font-size:14.5px; line-height:1.65; margin:12px 0; }
+  .card kbd { background:#1e293b; border:1px solid #475569; border-bottom-width:3px; border-radius:6px;
+    padding:1px 7px; font-size:11px; color:#fff; font-family:ui-monospace,monospace; }
+  .bigbtn { display:inline-block; margin-top:14px; padding:14px 34px; border-radius:14px; cursor:pointer;
+    background:linear-gradient(#ef4444,#991b1b); color:#fff; font-weight:900; font-size:18px; letter-spacing:1px;
+    border:2px solid #ffd700; box-shadow:0 6px 24px rgba(220,38,38,.5); }
+  .bigbtn:hover { filter:brightness(1.15); transform:translateY(-1px); }
+  .hidden { display:none !important; }
+  #err { position:absolute; inset:0; display:none; align-items:center; justify-content:center; z-index:50;
+    background:#7f1d1d; color:#fff; font-size:16px; padding:30px; text-align:center; }
+  /* touch: pad left, actions right; grids keep 390px portrait usable */
+  #touch { position:absolute; left:0; right:0; bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+    display:none; justify-content:space-between; align-items:end;
+    padding:0 max(16px, env(safe-area-inset-left, 0px)) 0 max(16px, env(safe-area-inset-right, 0px));
+    pointer-events:none; }
+  .tgroup { display:flex; gap:10px; pointer-events:auto; }
+  .tbtn { width:60px; height:60px; border-radius:50%; border:2px solid rgba(255,255,255,.4);
+    background:rgba(30,58,138,.6); color:#fff; font-size:20px; touch-action:none; }
+  .tbtn.on { background:rgba(220,38,38,.75); }
+  .utilbtn { position:absolute; top:14px; right:16px; z-index:7; display:none;
+    width:46px; height:46px; border-radius:12px; border:1px solid rgba(255,255,255,.35);
+    background:rgba(2,6,23,.62); color:#fff; font-size:20px; }
+  .objlist { text-align:left; display:inline-block; margin:6px auto 0; }
+  .objlist div { color:#e2e8f0; font-size:14px; margin:3px 0; }
+  @media (pointer:coarse) {
+    #touch { display:flex; }
+    #hint { display:none; }
+    #title-tag { display:none; }
+    .utilbtn { display:block; }
+    #score-panel { top:68px; padding:7px 12px; }
+    #score-panel .score { font-size:16px; }
+    #hud .bar { width:min(190px,40vw); padding:4px 7px; }
+    .bar label { font-size:10px; }
+    #objectives { top:64px; }
+    .obj { font-size:10px; padding:4px 9px; }
+    #bossbar { top:100px; }
+    #progress { display:none; }
+  }
+  @media (pointer:coarse) and (orientation:portrait) {
+    /* narrow screens: objectives stack as a left column, never overlapping */
+    #objectives { top:224px; left:16px; transform:none; flex-direction:column;
+      align-items:flex-start; max-width:60vw; }
+    #bossbar { top:320px; width:min(420px,92vw); }
+    #god-badge { top:150px; }
+    .tgroup { display:grid; gap:8px; }
+    #tMove { grid-template-columns:repeat(3,54px); grid-template-areas:'. f .' 'l b r'; }
+    #tF { grid-area:f; } #tL { grid-area:l; } #tB { grid-area:b; } #tR { grid-area:r; }
+    #tAct { grid-template-columns:repeat(3,54px); }
+    .tbtn { width:54px; height:54px; font-size:18px; }
+  }
+  @media (pointer:coarse) and (orientation:landscape) {
+    .tbtn { width:48px; height:48px; font-size:17px; }
+    #touch { bottom:10px; }
+    #hud { top:8px; left:10px; gap:5px; }
+    .card { padding:20px 26px; }
+    .card h1 { font-size:26px; }
+  }
+  #dmg { position:absolute; inset:0; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center, transparent 40%, rgba(220,38,38,.55) 100%); transition:opacity .1s; }
+  /* pause menu */
+  #pause .card { min-width:min(460px,92vw); }
+  .setrow { display:flex; align-items:center; justify-content:space-between; gap:14px; text-align:left;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:10px;
+    padding:10px 14px; margin:8px 0; font-size:14px; color:#e2e8f0; }
+  .setrow small { display:block; color:#94a3b8; font-size:11.5px; margin-top:2px; }
+  .switch { position:relative; width:46px; height:26px; flex:none; }
+  .switch input { opacity:0; width:100%; height:100%; position:absolute; cursor:pointer; margin:0; }
+  .knob { position:absolute; inset:0; background:#334155; border-radius:20px; transition:.15s; pointer-events:none; }
+  .knob:after { content:''; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:.15s; }
+  .switch input:checked + .knob { background:#16a34a; }
+  .switch input:checked + .knob:after { left:23px; }
+  .btnrow { display:flex; gap:10px; justify-content:center; margin-top:12px; flex-wrap:wrap; }
+  .btnrow .bigbtn { margin-top:0; }
+  .qselect { background:#1e293b; color:#fff; border:1px solid rgba(255,255,255,.25);
+    border-radius:8px; padding:6px 10px; font-size:14px; font-family:inherit; }
+  .ghostbtn { padding:12px 22px; border-radius:12px; cursor:pointer; background:rgba(255,255,255,.08);
+    color:#fff; font-weight:700; font-size:15px; border:1px solid rgba(255,255,255,.25); }
+  .ghostbtn:hover { background:rgba(255,255,255,.16); }
+  #god-badge { position:absolute; top:66px; left:50%; transform:translateX(-50%); display:none;
+    background:rgba(22,163,74,.85); border:1px solid #ffd700; color:#fff; font-weight:900; font-size:13px;
+    letter-spacing:2px; padding:6px 18px; border-radius:20px; pointer-events:none; z-index:6; }
+  #floaters { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:4; }
+  .floater { position:absolute; transform:translate(-50%,-50%); font-weight:900; font-size:17px;
+    text-shadow:0 2px 0 #000, 0 0 10px rgba(0,0,0,.7); white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas" role="img" aria-label="3D superhero platformer world"></canvas>
+  <div id="vignette"></div><div id="topglow"></div><div id="dmg"></div>
+  <button type="button" class="utilbtn" id="tPause" aria-label="Pause game">⏸</button>
+  <div id="hud">
+    <div class="bar"><label id="hp-label" for="hp-fill">❤ HEALTH 100</label><div class="track" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="hp-meter"><div class="fill" id="hp-fill"></div></div></div>
+    <div class="bar"><label id="fl-label" for="fl-fill">✈ FLIGHT 100</label><div class="track" role="meter" aria-label="Flight energy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="fl-meter"><div class="fill" id="fl-fill"></div></div></div>
+    <div class="bar"><label id="ht-label" for="ht-fill">👁 HEAT 100</label><div class="track" role="meter" aria-label="Heat vision energy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="ht-meter"><div class="fill" id="ht-fill"></div></div></div>
+    <div class="bar"><label id="bo-label" for="bo-fill">⚡ HYPER 100</label><div class="track" role="meter" aria-label="Hyperspeed energy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="bo-meter"><div class="fill" id="bo-fill"></div></div></div>
+  </div>
+  <div id="score-panel"><div class="score" id="score">SCORE 0</div><div class="meta" id="meta">👪 0/5 &nbsp; ⏱ 0s</div></div>
+  <div id="progress"><div class="track"><div class="fill" id="prog-fill"></div></div><div class="lbl">🦸 ———— Solaris City ———— 🗼</div></div>
+  <div id="objectives" aria-live="polite">
+    <span class="obj" id="obj-civ">👪 Citizens 0/5</span>
+    <span class="obj" id="obj-boss">🤖 Umbra-Mech: ACTIVE</span>
+    <span class="obj" id="obj-beacon">🗼 Beacon: LOCKED</span>
+  </div>
+  <div id="bossbar"><div class="name">☠ UMBRA-MECH</div><div class="track" role="meter" aria-label="Umbra-Mech health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="boss-meter"><div class="fill" id="boss-fill"></div></div></div>
+  <div id="banner" aria-live="polite"></div>
+  <div id="cross"><div class="ring"></div></div>
+  <div id="floaters"></div>
+  <div id="hint"><b>Left-click (hold)</b> heat vision &nbsp;•&nbsp; <b>Mouse</b> steers camera &nbsp;•&nbsp; <b>Wheel-click</b> lock target &nbsp;•&nbsp; <b>WASD</b> move &nbsp;•&nbsp; <b>Space</b> hold to <b>FLY</b> (<b>C</b> dives) &nbsp;•&nbsp; <b>Q</b> grab rubble, <b>J</b>/click to throw &nbsp;•&nbsp; <b>Shift</b> ⚡ hyperspeed &nbsp;•&nbsp; <b>P</b> menu</div>
+  <div id="god-badge">⭐ GOD MODE ⭐</div>
+  <div id="title-tag">☀ SUNWARDEN: SOLARIS RESCUE 3D</div>
+  <div id="touch">
+    <div class="tgroup" id="tMove">
+      <button type="button" class="tbtn" id="tF" aria-label="Move forward">▲</button><button type="button" class="tbtn" id="tL" aria-label="Move left">◀</button><button type="button" class="tbtn" id="tB" aria-label="Move back">▼</button><button type="button" class="tbtn" id="tR" aria-label="Move right">▶</button>
+    </div>
+    <div class="tgroup" id="tAct">
+      <button type="button" class="tbtn" id="tJ" aria-label="Jump, hold to fly">⤒</button><button type="button" class="tbtn" id="tP" aria-label="Punch">👊</button><button type="button" class="tbtn" id="tE" aria-label="Heat vision, drag elsewhere to aim">👁</button><button type="button" class="tbtn" id="tH" aria-label="Hyperspeed">⚡</button><button type="button" class="tbtn" id="tDive" aria-label="Dive down while flying">⤓</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="menu" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
+    <div class="card">
+      <h1 id="menuTitle">☀ SUNWARDEN<br>SOLARIS RESCUE 3D</h1>
+      <p>Dr. Umbra's machines have blacked out <b style="color:#fff">Solaris City</b>.<br>
+      As <b style="color:#fff">Sol, the Sunwarden</b>, rescue <b style="color:#fff">5 citizens</b>, overcharge on
+      <b style="color:#fff">solar cells</b>, bring down the <b style="color:#fff">UMBRA-MECH</b>,<br>then reignite the
+      <b style="color:#fff">Beacon Tower</b> to win.</p>
+      <div class="objlist">
+        <div>1️⃣ &nbsp;Rescue 5 citizens 👪 (follow the light beacons)</div>
+        <div>2️⃣ &nbsp;Defeat the UMBRA-MECH 🤖 (dodge the red slam ring!)</div>
+        <div>3️⃣ &nbsp;Reach the Beacon Tower 🗼 (green ring = open)</div>
+      </div>
+      <p class="kb-only"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Space</kbd> jump — hold in air to <b>FLY</b> (release to hover, <kbd>C</kbd> dives)<br>
+      <kbd>🖱 Left-click HOLD</kbd> <b style="color:#ffb4a2">heat vision</b> (own 👁 bar) — mouse steers the camera, beam follows the cursor<br>
+      <kbd>Wheel-click</kbd> lock onto a foe (beam + camera track it) &nbsp; <kbd>Shift HOLD</kbd> <b style="color:#c4b5fd">⚡ hyperspeed ×2</b> spools up — hold 0.5s mid-flight for a <b>SONIC BOOM</b><br>
+      <kbd>J</kbd> punch &nbsp; <kbd>Q</kbd> grab rubble (<kbd>J</kbd>/click throws) &nbsp; <kbd>K</kbd> laser &nbsp; <kbd>P</kbd> menu &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>F</kbd> fullscreen</p>
+      <p class="touch-only">Left pad to move • ⤒ jump (hold to fly) • 👁 heat vision (drag screen to aim, double-tap: lock) • ⤓ dive • ⚡ hyperspeed • 👊 punch</p>
+      <button type="button" class="bigbtn" id="startBtn">▶ &nbsp;TAKE FLIGHT</button>
+      <p id="menuBest" style="font-size:13px;color:#ffd700;min-height:18px"></p>
+      <p style="font-size:12px;opacity:.7">No install • runs offline after first load • best on a 1080p display</p>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="end" role="dialog" aria-modal="true" aria-labelledby="endTitle">
+    <div class="card">
+      <h2 id="endTitle">🎉 CITY SAVED!</h2>
+      <p id="endText"></p>
+      <p id="bestText" style="font-size:13px;color:#ffd700"></p>
+      <button type="button" class="bigbtn" id="againBtn">⟳ &nbsp;PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="pause" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+    <div class="card">
+      <h2 id="pauseTitle" style="color:#ffd700">⏸ PAUSED</h2>
+      <div class="setrow"><div>⭐ God Mode<small>No damage + infinite flight, heat &amp; hyper bars</small></div><label class="switch"><input type="checkbox" id="set-god"><span class="knob"></span></label></div>
+      <div class="setrow"><div>🔊 Sound<small>Effects &amp; jingles</small></div><label class="switch"><input type="checkbox" id="set-sound" checked><span class="knob"></span></label></div>
+      <div class="setrow"><div>📷 Screen shake<small>Impact rumble on hits &amp; punches</small></div><label class="switch"><input type="checkbox" id="set-shake" checked><span class="knob"></span></label></div>
+      <div class="setrow"><div>🎥 Auto-follow camera<small>Swings behind you GTA-style; off = right-drag orbit only</small></div><label class="switch"><input type="checkbox" id="set-follow" checked><span class="knob"></span></label></div>
+      <div class="setrow"><div>🖱 Mouse look<small>How fast the cursor steers the camera</small></div><select class="qselect" id="set-sens" aria-label="Mouse look sensitivity"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select></div>
+      <div class="setrow"><div>✨ Quality<small>Auto lowers resolution &amp; shadows if slow</small></div><select class="qselect" id="set-quality" aria-label="Graphics quality"><option value="auto" selected>Auto</option><option value="high">High</option><option value="low">Low</option></select></div>
+      <div class="btnrow"><button type="button" class="bigbtn" id="resumeBtn">▶ RESUME</button></div>
+      <div class="btnrow"><button type="button" class="ghostbtn" id="restartBtn">⟳ Restart</button><button type="button" class="ghostbtn" id="quitBtn">🏠 Menu</button></div>
+    </div>
+  </div>
+
+  <div id="err"><div>Could not load the 3D engine.<br>Check your internet connection once, then reload — the game runs offline afterwards.<br><br><small>Tried cdnjs + jsdelivr (three.js r128)</small></div></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>if(!window.THREE){document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>');}</script>
+<script>
+(function(){
+'use strict';
+if(typeof THREE==='undefined'){ document.getElementById('err').style.display='flex'; return; }
+
+/* ================= CONFIG ================= */
+var WORLD_LEN=460, GROUND_Y=0;
+var STEP=1/60, GRAV=-58, MOVE_SPEED=13, AIR_CTRL=0.55, JUMP_V=19, MAX_FALL=-42;
+var FLY_MAX_UP=12, FLY_DRAIN=3.0, FLY_HOVER_DRAIN=1.3, FLY_DIVE_DRAIN=1.8;
+var FLIGHT_REGEN=30, HEAT_REGEN=26, HEAT_AIR_REGEN=10;
+var LASER_DRAIN=20, LASER_DPS=46;
+var BOOST_DRAIN=14, BOOST_REGEN=18, BOOST_AIR_REGEN=6, BOOST_MULT=2.0;
+var BEAM_LEN=400; // effectively infinite on screen
+
+/* ================= STATE ================= */
+var state='menu', paused=false, muted=false;
+var score=0, gameTime=0, rescued=0, trauma=0, endLock=0;
+// progression: lives + checkpoints soften late deaths; finish needs citizens + boss
+var lives=3, deaths=0, checkpoint={x:2,y:3,z:0};
+var bossIntro=false, bossDown=false, bossDieT=0, denyCD=0, finishDenyT=0;
+var bannerTimer=0;
+// tiny safe-storage wrapper (private-mode browsers throw on localStorage)
+var store={get:function(k,d){try{var v=localStorage.getItem('sunwarden3d.'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set:function(k,v){try{localStorage.setItem('sunwarden3d.'+k,JSON.stringify(v));}catch(e){}}};
+var RM=(typeof matchMedia==='function')&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+var bannerEl=document.getElementById('banner');
+function showBanner(txt,cls,dur){ if(!bannerEl) return; bannerEl.textContent=txt; bannerEl.className='show '+(cls||''); bannerTimer=dur||2.6; }
+/* target lock (wheel-click) + sonic boom + mouse-steer state */
+var locked=null; // locked enemy object or null
+var boomCharge=0, boomArmed=true, boomT=0, boomCount=0;
+var lastTapT=0;
+/* floating combat text: pooled HTML labels projected from 3D (no textures/GC churn) */
+var FPOOL=[];
+(function(){
+  var box=document.getElementById('floaters');
+  for(var i=0;i<8;i++){ var d=document.createElement('div'); d.className='floater'; d.style.display='none'; box.appendChild(d);
+    FPOOL.push({el:d, x:0,y:0,z:0, life:0, max:1}); }
+})();
+function addFloater(x,y,z,text,color){
+  for(var i=0;i<FPOOL.length;i++){ var f=FPOOL[i];
+    if(f.life>0) continue;
+    f.x=x; f.y=y; f.z=z; f.life=f.max=1.2; f.el.textContent=text; f.el.style.color=color||'#fff'; f.el.style.display='block';
+    return;
+  }
+}
+var _pv=new THREE.Vector3();
+function updateFloaters(dt){
+  for(var i=0;i<FPOOL.length;i++){ var f=FPOOL[i];
+    if(f.life<=0) continue;
+    f.life-=dt; f.y+=dt*1.6;
+    if(f.life<=0){ f.el.style.display='none'; continue; }
+    _pv.set(f.x,f.y,f.z).project(camera);
+    if(_pv.z>1){ f.el.style.display='none'; f.life=0; continue; }
+    f.el.style.left=((_pv.x*0.5+0.5)*window.innerWidth)+'px';
+    f.el.style.top=((-_pv.y*0.5+0.5)*window.innerHeight)+'px';
+    f.el.style.opacity=Math.min(1,f.life*2);
+  }
+}
+// HUD objective + boss refs (wired once; updated in updateHUD/update)
+var elCiv=document.getElementById('obj-civ'), elBoss=document.getElementById('obj-boss'), elBeacon=document.getElementById('obj-beacon');
+var bossBarEl=document.getElementById('bossbar'), bossFillEl=document.getElementById('boss-fill'), bossMeterEl=document.getElementById('boss-meter');
+var keys={}, mouseDown=false, prevMouseDown=false, mouseNDC={x:0,y:0}, mousePX={x:0,y:0}, mouseSeen=false;
+var orbiting=false, lastMX=0, lastMY=0;
+var orbitYaw=0, orbitPitch=0; // user orbit offsets
+var touch={f:false,b:false,l:false,r:false,j:false,p:false,e:false,h:false,d:false};
+var punchQueued=false, punchPrev=false;
+var lastMV={x:0,z:0}; // latest move input, shared with the camera system
+var crossEl=null; // cached in boot below
+
+/* ================= SETTINGS + PAUSE MENU ================= */
+// god mode is deliberately NOT persisted (cheat); the rest are.
+var settings={god:false,
+  sound:store.get('sound',true), shake:store.get('shake',true), follow:store.get('follow',true),
+  quality:store.get('quality','auto'), sens:store.get('sens','normal')};
+function saveSettings(){ store.set('sound',settings.sound); store.set('shake',settings.shake); store.set('follow',settings.follow); store.set('quality',settings.quality); store.set('sens',settings.sens); }
+function syncSettings(){
+  muted=!settings.sound;
+  document.getElementById('god-badge').style.display=settings.god?'block':'none';
+}
+function setPause(v){
+  if(state!=='play') return;
+  paused=v; mouseDown=false;
+  document.getElementById('pause').classList.toggle('hidden',!v);
+}
+document.getElementById('set-god').addEventListener('change',function(e){ settings.god=e.target.checked; syncSettings(); });
+document.getElementById('set-sound').addEventListener('change',function(e){ settings.sound=e.target.checked; syncSettings(); saveSettings(); });
+document.getElementById('set-shake').addEventListener('change',function(e){ settings.shake=e.target.checked; saveSettings(); });
+document.getElementById('set-follow').addEventListener('change',function(e){ settings.follow=e.target.checked; saveSettings(); });
+document.getElementById('set-quality').addEventListener('change',function(e){ settings.quality=e.target.value; saveSettings(); applyQuality(true); });
+document.getElementById('set-sens').addEventListener('change',function(e){ settings.sens=e.target.value; saveSettings(); });
+document.getElementById('resumeBtn').addEventListener('click',function(){ setPause(false); });
+document.getElementById('restartBtn').addEventListener('click',function(){ startGame(); });
+document.getElementById('quitBtn').addEventListener('click',function(){
+  paused=false; mouseDown=false; state='menu';
+  document.getElementById('pause').classList.add('hidden');
+  document.getElementById('menu').classList.remove('hidden');
+  refreshMenuBest();
+});
+function refreshMenuBest(){
+  var b=store.get('best',0);
+  document.getElementById('menuBest').textContent=b>0?'🏆 Best score: '+b:'';
+}
+// reflect persisted settings in the checkboxes (M key goes through the same path)
+document.getElementById('set-sound').checked=settings.sound;
+document.getElementById('set-shake').checked=settings.shake;
+document.getElementById('set-follow').checked=settings.follow;
+document.getElementById('set-quality').value=settings.quality;
+document.getElementById('set-sens').value=settings.sens;
+syncSettings();
+
+/* ================= AUDIO ================= */
+var AC=null, lastLaserSfx=0;
+function beep(f,d,type,v,slide){
+  if(muted) return;
+  try{
+    if(!AC) AC=new (window.AudioContext||window.webkitAudioContext)();
+    if(AC.state==='suspended') AC.resume();
+    var o=AC.createOscillator(), g=AC.createGain();
+    o.type=type||'square'; o.frequency.setValueAtTime(f,AC.currentTime);
+    if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(20,slide),AC.currentTime+d);
+    g.gain.setValueAtTime(v||0.07,AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,AC.currentTime+d);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime+d);
+  }catch(e){}
+}
+function jingle(n,gap,type,v){ for(var i=0;i<n.length;i++)(function(f,j){setTimeout(function(){beep(f,0.18,type||'sine',v||0.08);},j*gap);})(n[i],i); }
+var sfx={
+  jump:function(){beep(300,0.15,'square',0.06,640);},
+  punch:function(){beep(150,0.1,'square',0.09,60);},
+  hit:function(){beep(220,0.18,'sawtooth',0.09,80);},
+  pickup:function(){beep(660,0.09,'sine',0.08); setTimeout(function(){beep(990,0.13,'sine',0.08);},85);},
+  rescue:function(){jingle([523,659,784,1046],105,'sine',0.09);},
+  hurt:function(){beep(110,0.28,'sawtooth',0.1,50);},
+  shoot:function(){beep(520,0.09,'square',0.035,220);},
+  win:function(){jingle([523,659,784,1046,1318],145,'triangle',0.1);},
+  lose:function(){jingle([400,300,200,120],190,'sawtooth',0.08);}
+};
+function laserSfx(){ var n=performance.now(); if(n-lastLaserSfx>95){ lastLaserSfx=n; beep(1350,0.09,'sawtooth',0.03,420); } }
+
+/* ================= THREE SETUP ================= */
+var canvas=document.getElementById('game-canvas');
+var renderer;
+try{
+  renderer=new THREE.WebGLRenderer({canvas:canvas, antialias:true});
+}catch(e){ document.getElementById('err').style.display='flex'; return; }
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputEncoding=THREE.sRGBEncoding;
+// ACES tames the blown-out look (the old build rendered the grass nearly white)
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.0;
+
+var scene=new THREE.Scene();
+scene.background=skyTex;
+scene.fog=new THREE.Fog(0xc3d9f2,80,380);
+
+var camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,1200);
+camera.position.set(-12,8,14);
+
+var hemi=new THREE.HemisphereLight(0xbfd9ff,0x3a5f3a,0.65); scene.add(hemi);
+var sun=new THREE.DirectionalLight(0xfff2cc,1.0);
+sun.position.set(-40,70,30); sun.castShadow=true;
+sun.shadow.mapSize.width=2048; sun.shadow.mapSize.height=2048;
+sun.shadow.camera.left=-60; sun.shadow.camera.right=60;
+sun.shadow.camera.top=60; sun.shadow.camera.bottom=-60;
+sun.shadow.camera.far=220; sun.shadow.bias=-0.0006;
+scene.add(sun); scene.add(sun.target); scene.add(new THREE.AmbientLight(0xffffff,0.08));
+
+window.addEventListener('resize',function(){
+  camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+/* ================= TEXTURE MAKERS ================= */
+function canvasTex(w,h,fn){
+  var c=document.createElement('canvas'); c.width=w; c.height=h;
+  fn(c.getContext('2d'),w,h);
+  var t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding; return t;
+}
+var windowTex=canvasTex(128,256,function(g,w,h){
+  g.fillStyle='#1b2a4a'; g.fillRect(0,0,w,h);
+  for(var y=8;y<h-8;y+=16) for(var x=8;x<w-8;x+=16){
+    g.fillStyle=Math.random()>0.45?'#fde047':'#274063';
+    g.fillRect(x,y,10,11);
+  }
+});
+var groundTex=canvasTex(256,256,function(g,w,h){
+  g.fillStyle='#2e7a3c'; g.fillRect(0,0,w,h);
+  g.fillStyle='#2a7040';
+  for(var i=0;i<300;i++) g.fillRect(Math.random()*w,Math.random()*h,3,3);
+  g.fillStyle='#59616e'; g.fillRect(0,0,w,26);
+  g.fillStyle='#e2e8f0'; for(var x=0;x<w;x+=32) g.fillRect(x,11,18,4);
+});
+groundTex.wrapS=groundTex.wrapT=THREE.RepeatWrapping; groundTex.repeat.set(40,40);
+var shieldTex=canvasTex(128,128,function(g){
+  // original sunburst sigil of the Sunwarden (no DC iconography)
+  g.clearRect(0,0,128,128);
+  g.strokeStyle='#ffd700'; g.lineWidth=9; g.lineCap='round';
+  for(var i=0;i<8;i++){ var a=i/8*Math.PI*2;
+    g.beginPath(); g.moveTo(64+Math.cos(a)*44,64+Math.sin(a)*44);
+    g.lineTo(64+Math.cos(a)*58,64+Math.sin(a)*58); g.stroke(); }
+  g.fillStyle='#ffd700'; g.beginPath(); g.arc(64,64,38,0,7); g.fill();
+  g.fillStyle='#c2410c'; g.beginPath(); g.arc(64,64,24,0,7); g.fill();
+  g.fillStyle='#fef3c7'; g.beginPath(); g.arc(64,64,11,0,7); g.fill();
+});
+var earthTex=canvasTex(256,128,function(g,w,h){
+  g.fillStyle='#2563eb'; g.fillRect(0,0,w,h);
+  g.fillStyle='#22c55e';
+  for(var i=0;i<9;i++){ g.beginPath(); g.ellipse(Math.random()*w,Math.random()*h,20+Math.random()*30,12+Math.random()*18,Math.random()*3,0,7); g.fill(); }
+});
+// cool-white variant for building variety (warm windowTex above stays)
+var windowTex2=canvasTex(128,256,function(g,w,h){
+  g.fillStyle='#232f45'; g.fillRect(0,0,w,h);
+  for(var y=8;y<h-8;y+=16) for(var x=8;x<w-8;x+=16){
+    g.fillStyle=Math.random()>0.5?'#bfe3ff':'#33415c';
+    g.fillRect(x,y,10,11);
+  }
+});
+// asphalt with edge lines + dashed center, tiled along the street
+var roadTex=canvasTex(256,256,function(g,w,h){
+  g.fillStyle='#262c36'; g.fillRect(0,0,w,h);
+  for(var i=0;i<500;i++){ g.fillStyle='rgba(255,255,255,0.03)'; g.fillRect(Math.random()*w,Math.random()*h,2,2); }
+  g.fillStyle='#c8a93c'; g.fillRect(0,10,w,6); g.fillRect(0,h-16,w,6);
+  g.fillStyle='#e8edf3';
+  for(var x=0;x<w;x+=42) g.fillRect(x,h/2-3,24,6);
+});
+roadTex.wrapS=roadTex.wrapT=THREE.RepeatWrapping; roadTex.repeat.set(70,1);
+// sidewalk slabs with expansion joints
+var walkTex=canvasTex(128,128,function(g,w,h){
+  g.fillStyle='#9aa3b2'; g.fillRect(0,0,w,h);
+  g.fillStyle='#878f9e'; g.fillRect(0,0,w,5); g.fillRect(0,0,5,h);
+  for(var i=0;i<120;i++){ g.fillStyle='rgba(0,0,0,0.05)'; g.fillRect(Math.random()*w,Math.random()*h,2,2); }
+});
+walkTex.wrapS=walkTex.wrapT=THREE.RepeatWrapping; walkTex.repeat.set(90,1);
+// vertical sky gradient backdrop (screen-space in r128)
+var skyTex=canvasTex(4,512,function(g,w,h){
+  var gr=g.createLinearGradient(0,0,0,h);
+  gr.addColorStop(0,'#16307a'); gr.addColorStop(0.42,'#3f74c9');
+  gr.addColorStop(0.68,'#8fbde9'); gr.addColorStop(0.85,'#d7e9f7'); gr.addColorStop(1,'#f6e8c8');
+  g.fillStyle=gr; g.fillRect(0,0,w,h);
+});
+
+/* ================= WORLD ================= */
+// a few static-decor geometries live here because this section runs before
+// the shared-asset library below (one-time cost, reused for every building)
+var GEO_HOIST={
+  box:new THREE.BoxGeometry(1,1,1),
+  cone:new THREE.ConeGeometry(0.5,1.2,8),
+  pole:new THREE.CylinderGeometry(0.15,0.15,1,6),
+  bulb:new THREE.SphereGeometry(0.55,8,8)
+};
+var sunBall=new THREE.Mesh(new THREE.SphereGeometry(9,24,24),
+  new THREE.MeshBasicMaterial({color:0xfffbd0, fog:false}));
+sunBall.position.set(-160,120,-160); scene.add(sunBall);
+
+var clouds=[];
+(function(){
+  var m=new THREE.MeshLambertMaterial({color:0xffffff, transparent:true, opacity:0.88});
+  for(var i=0;i<14;i++){
+    var g=new THREE.Group();
+    for(var j=0;j<4;j++){
+      var s=new THREE.Mesh(new THREE.SphereGeometry(3+Math.random()*3.5,12,10),m);
+      s.position.set(j*4-6+Math.random()*2,Math.random()*1.5,Math.random()*3);
+      s.scale.y=0.55; g.add(s);
+    }
+    g.position.set(Math.random()*WORLD_LEN-30,34+Math.random()*22,(Math.random()-0.5)*120);
+    scene.add(g); clouds.push({g:g,sp:0.6+Math.random()*1.2});
+  }
+})();
+
+var ground=new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LEN+220,240),
+  new THREE.MeshLambertMaterial({map:groundTex}));
+ground.rotation.x=-Math.PI/2; ground.position.set(WORLD_LEN/2-20,-0.05,0);
+ground.receiveShadow=true; scene.add(ground);
+// city-road treatment: asphalt with lane markings, raised sidewalks, grass verge
+// Solaris City district: 3 avenues along X (z=-40/0/40), blocks between them,
+// alleys where the cross streets would be. Buildings are collidable (roofs
+// are legal landings) and stop the heat beam like any other wall.
+var LANES=[-40,0,40];
+LANES.forEach(function(lz){
+  var r=new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LEN+220,16),
+    new THREE.MeshLambertMaterial({map:roadTex}));
+  r.rotation.x=-Math.PI/2; r.position.set(WORLD_LEN/2-20,0.02,lz);
+  r.receiveShadow=true; scene.add(r);
+  [lz-10.5,lz+10.5].forEach(function(z){
+    var sw=new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LEN+220,5),
+      new THREE.MeshLambertMaterial({map:walkTex}));
+    sw.rotation.x=-Math.PI/2; sw.position.set(WORLD_LEN/2-20,0.09,z);
+    sw.receiveShadow=true; scene.add(sw);
+  });
+});
+
+// side buildings: 3 archetypes x warm/cool windows, shared geo + 6 materials
+var bldgMats=[];
+var blinkers=[];
+var citySolids=[]; // load-once building shells, re-registered into solids each run
+var MATblinkOn=bas(0xff3b30), MATblinkOff=bas(0x551111);
+(function(){
+  var palettes=[
+    new THREE.MeshLambertMaterial({color:0x8fa3c4, emissive:0x1a1a1a, emissiveMap:windowTex, map:windowTex}),
+    new THREE.MeshLambertMaterial({color:0x7d8fb0, emissive:0x1a1a1a, emissiveMap:windowTex, map:windowTex}),
+    new THREE.MeshLambertMaterial({color:0x9fb0cc, emissive:0x111622, emissiveMap:windowTex2, map:windowTex2}),
+    new THREE.MeshLambertMaterial({color:0x6f86a8, emissive:0x111622, emissiveMap:windowTex2, map:windowTex2})
+  ];
+  var antM=bas(0x111827);
+  var BANDS=[[-70,-50,-60],[-30,-10,-20],[10,30,20],[50,70,60]]; // [z0,z1,center]
+  for(var i=0;i<96;i++){
+    var band=BANDS[i%BANDS.length];
+    var arch=(i/BANDS.length|0)%3;
+    var x=10+Math.random()*(WORLD_LEN-24);
+    if(Math.abs(x-104)<10||Math.abs(x-224)<10) continue; // alleys (cross streets)
+    if(x>166&&Math.abs(band[2])<34) continue; // boss arena + beacon plaza stay clear
+    var w=8+Math.random()*8, d=Math.min(16,band[1]-band[0]-4);
+    var h=arch===0?26+Math.random()*26:(arch===1?12+Math.random()*14:18+Math.random()*20);
+    var z=band[0]+3+Math.random()*Math.max(1,(band[1]-band[0]-6));
+    var mt=palettes[i%palettes.length];
+    var b=new THREE.Mesh(GEO_HOIST.box,mt);
+    b.scale.set(w,h,d); b.position.set(x,h/2,z);
+    scene.add(b); bldgMats.push(b);
+    var hTot=h;
+    if(arch===0){ // tower setback crown
+      var crown=new THREE.Mesh(GEO_HOIST.box,mt);
+      crown.scale.set(w*0.55,h*0.18,d*0.55); crown.position.set(x,h+h*0.09,z);
+      scene.add(crown); hTot=h+h*0.18;
+    } else if(arch===2){ // spire
+      var sp=new THREE.Mesh(GEO_HOIST.cone,mt);
+      sp.scale.set(Math.min(w,d)*0.9,h*0.4,Math.min(w,d)*0.9); sp.position.set(x,h+h*0.2,z);
+      scene.add(sp); hTot=h+h*0.4;
+    } else { // slab parapet
+      var par=new THREE.Mesh(GEO_HOIST.box,mt);
+      par.scale.set(w+0.6,1.2,d+0.6); par.position.set(x,h+0.6,z);
+      scene.add(par); hTot=h+1.2;
+    }
+    // collidable shell: roofs are legal landings, walls stop you and the beam
+    citySolids.push({min:new THREE.Vector3(x-w/2,0,z-d/2),max:new THREE.Vector3(x+w/2,hTot,z+d/2),
+      mesh:null, edge:null, fade:1, noFade:true, bld:true});
+    if(Math.random()>0.55){ // antenna with blinking light
+      var a=new THREE.Mesh(GEO_HOIST.pole,antM);
+      a.scale.set(1,6,1); a.position.set(x,hTot+3,z); scene.add(a);
+      var lamp=new THREE.Mesh(GEO_HOIST.bulb,MATblinkOn);
+      lamp.position.set(x,hTot+6.4,z); lamp.userData.phase=Math.random()*6;
+      scene.add(lamp); blinkers.push(lamp);
+    }
+  }
+})();
+
+// street lamps along every avenue sidewalk: 2 instanced draw calls total
+(function(){
+  var poleM=lam(0x0f172a), bulbM=bas(0xfef9c3);
+  var spots=[];
+  for(var x=0;x<WORLD_LEN;x+=20){
+    for(var li=0;li<LANES.length;li++){ spots.push([x,LANES[li]-10.5]); spots.push([x,LANES[li]+10.5]); }
+  }
+  var poles=new THREE.InstancedMesh(GEO_HOIST.lampPole,poleM,spots.length);
+  var bulbs=new THREE.InstancedMesh(GEO_HOIST.bulb,bulbM,spots.length);
+  var M=new THREE.Matrix4();
+  for(var i=0;i<spots.length;i++){
+    M.makeTranslation(spots[i][0],3.5,spots[i][1]); poles.setMatrixAt(i,M);
+    M.makeTranslation(spots[i][0],7.1,spots[i][1]); bulbs.setMatrixAt(i,M);
+  }
+  poles.instanceMatrix.needsUpdate=true; bulbs.instanceMatrix.needsUpdate=true;
+  scene.add(poles); scene.add(bulbs);
+})();
+
+/* ================= SHARED ASSETS =================
+   Built once at load; level rebuilds reuse them and never dispose them, so
+   repeated restarts cannot grow GPU memory. Per-level meshes live in a fresh
+   levelGroup each run; only the group node is dropped on rebuild. */
+var GEO={
+  box:new THREE.BoxGeometry(1,1,1),
+  ball:new THREE.SphereGeometry(1,12,10),
+  pillar:new THREE.CylinderGeometry(0.45,0.55,1,10),
+  ring:new THREE.TorusGeometry(1,0.07,10,40),
+  octa:new THREE.OctahedronGeometry(0.65),
+  halo:new THREE.SphereGeometry(1.15,12,10),
+  cone:new THREE.ConeGeometry(0.5,1.2,8),
+  bullet:new THREE.SphereGeometry(0.22,8,8),
+  part:new THREE.SphereGeometry(0.14,6,6),
+  lampPole:new THREE.CylinderGeometry(0.14,0.18,7,8),
+  lampBulb:new THREE.SphereGeometry(0.4,10,10),
+  tag:new THREE.PlaneGeometry(1,0.3),
+  civBody:new THREE.CylinderGeometry(0.32,0.38,1.0,10),
+  civHead:new THREE.SphereGeometry(0.3,14,12),
+  mark:new THREE.SphereGeometry(0.28,10,10),
+  eyeBox:new THREE.BoxGeometry(0.8,0.22,0.1),
+  rotor:new THREE.BoxGeometry(2.2,0.1,0.2),
+  droneBall:new THREE.SphereGeometry(0.8,16,12),
+  core:new THREE.SphereGeometry(0.34,12,10),
+  arm:new THREE.CylinderGeometry(0.17,0.145,1.0,10),
+  earth:new THREE.SphereGeometry(1.5,24,18)
+};
+function lam(c,e){ return new THREE.MeshLambertMaterial({color:c, emissive:e||0x000000}); }
+function bas(c){ return new THREE.MeshBasicMaterial({color:c}); }
+function fadeLam(c){ return new THREE.MeshLambertMaterial({color:c, transparent:true}); }
+function fadeBas(c){ return new THREE.MeshBasicMaterial({color:c, transparent:true}); }
+var MAT={
+  platA:fadeLam(0xd97706), platB:fadeLam(0x64748b), slab:fadeLam(0x2e7a3c),
+  edgeA:fadeBas(0xfff7cc), edgeB:fadeBas(0x38bdf8),
+  crystal:lam(0xfde047,0xaa8800),
+  halo:new THREE.MeshBasicMaterial({color:0xfde047, transparent:true, opacity:0.18, depthWrite:false}),
+  civSkin:lam(0xf2c89b), civSaved:lam(0x4ade80),
+  civShirts:[lam(0xf59e0b),lam(0x38bdf8),lam(0xf472b6),lam(0xa78bfa),lam(0x34d399)],
+  markRed:bas(0xdc2626),
+  walkBody:lam(0x475569), bruteBody:lam(0xc2410c),
+  eyeRed:bas(0xff2222), eyeWhite:bas(0xffffff),
+  tagBlue:bas(0x38bdf8), tagOrange:bas(0xfdba74),
+  droneBody:lam(0x475569), rotor:bas(0x1e293b),
+  bossBody:lam(0x7c2d12,0x301000), spike:lam(0xffd700),
+  beaconCiv:new THREE.MeshBasicMaterial({color:0x4ade80, transparent:true, opacity:0.14, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}),
+  beamBlue:new THREE.MeshBasicMaterial({color:0x38bdf8, transparent:true, opacity:0.13, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}),
+  beamGreen:new THREE.MeshBasicMaterial({color:0x4ade80, transparent:true, opacity:0.15, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}),
+  cpOff:lam(0x475569), cpOn:lam(0x16a34a,0x064e2b),
+  slam:new THREE.MeshBasicMaterial({color:0xff3b30, transparent:true, opacity:0.75, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide}),
+  bullet:bas(0xff5032),
+  arrow:bas(0xffd700),
+  finishBld:lam(0x1e3a8a), finishPed:lam(0x713f12),
+  earth:new THREE.MeshLambertMaterial({map:earthTex, emissive:0x113355}),
+  ringRed:bas(0xff3b30), ringGreen:bas(0x4ade80),
+  rubble:lam(0x8a8f98),
+  flare:new THREE.MeshBasicMaterial({color:0xfff1d6, transparent:true, opacity:0.9, blending:THREE.AdditiveBlending, depthWrite:false})
+};
+// fixed particle palette: meshes are pooled, materials shared (fade via scale, never opacity)
+var MATPART={};
+(function(){
+  var cols=[0xffffff,0xef4444,0x4ade80,0xcbd5e1,0xfde047,0xffd23f,0xff6a3d,0xbfe9ff,0xe2e8f0,0xffb4a2,0xc4b5fd];
+  for(var i=0;i<cols.length;i++) MATPART[cols[i]]=bas(cols[i]);
+  MATPART.white=MATPART[0xffffff];
+})();
+function partMatFor(c){ return MATPART[c]||MATPART.white; }
+// module-scope temps: the hot loop must not allocate
+var UPV=new THREE.Vector3(0,1,0);
+var _muzzle=new THREE.Vector3(), _v1=new THREE.Vector3(), _want=new THREE.Vector3(), _bdir=new THREE.Vector3();
+
+/* ---- pooled particles: 260 preallocated records, zero per-spawn allocation ---- */
+var PPOOL=[], PFREE=[];
+(function(){
+  for(var i=0;i<260;i++){
+    var m=new THREE.Mesh(GEO.part, MATPART.white); m.visible=false; scene.add(m);
+    var o={mesh:m, vx:0,vy:0,vz:0, life:0, max:1, active:false};
+    PPOOL.push(o); PFREE.push(o);
+  }
+})();
+function spawnParts(x,y,z,n,color,spd,life){
+  var mat=partMatFor(color);
+  for(var i=0;i<n;i++){
+    if(!PFREE.length) return;
+    var p=PFREE.pop();
+    p.active=true; p.vx=(Math.random()-0.5)*spd; p.vy=Math.random()*spd*0.8; p.vz=(Math.random()-0.5)*spd;
+    p.life=life*(0.6+Math.random()*0.7); p.max=life;
+    p.mesh.position.set(x,y,z); p.mesh.material=mat; p.mesh.scale.set(1,1,1); p.mesh.visible=true;
+  }
+}
+function updateParts(dt){
+  for(var i=0;i<PPOOL.length;i++){ var p=PPOOL[i];
+    if(!p.active) continue;
+    p.mesh.position.x+=p.vx*dt; p.mesh.position.y+=p.vy*dt; p.mesh.position.z+=p.vz*dt;
+    p.vy-=12*dt; p.life-=dt;
+    if(p.life<=0){ p.active=false; p.mesh.visible=false; PFREE.push(p); continue; }
+    var s=Math.max(0.01,p.life/p.max); p.mesh.scale.set(s,s,s);
+  }
+}
+function clearParts(){ for(var i=0;i<PPOOL.length;i++){ PPOOL[i].active=false; PPOOL[i].mesh.visible=false; } PFREE.length=0; for(var j=0;j<PPOOL.length;j++) PFREE.push(PPOOL[j]); }
+function activeParts(){ var n=0; for(var i=0;i<PPOOL.length;i++) if(PPOOL[i].active) n++; return n; }
+/* ---- pooled enemy bullets: 24 fixed records ---- */
+var BPOOL=[];
+(function(){
+  for(var i=0;i<24;i++){
+    var m=new THREE.Mesh(GEO.bullet, MAT.bullet); m.visible=false; scene.add(m);
+    BPOOL.push({mesh:m, vx:0,vy:0,vz:0, life:0, active:false});
+  }
+})();
+function fireBullet(x,y,z,vx,vy,vz){
+  for(var i=0;i<BPOOL.length;i++){ var b=BPOOL[i];
+    if(b.active) continue;
+    b.active=true; b.vx=vx; b.vy=vy; b.vz=vz; b.life=3.2;
+    b.mesh.position.set(x,y,z); b.mesh.visible=true; return;
+  }
+}
+function clearBullets(){ for(var i=0;i<BPOOL.length;i++){ BPOOL[i].active=false; BPOOL[i].mesh.visible=false; } }
+function activeBullets(){ var n=0; for(var i=0;i<BPOOL.length;i++) if(BPOOL[i].active) n++; return n; }
+// sonic-boom shockwave ring (own opacity-animated material, one user only)
+var boomRingMat=new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide});
+var boomRing=new THREE.Mesh(GEO.ring,boomRingMat);
+boomRing.visible=false; scene.add(boomRing);
+// lock-on marker: spinning diamond over the locked foe (persistent, one mesh)
+var lockMarker=new THREE.Mesh(GEO.octa,MAT.markRed);
+lockMarker.scale.set(0.45,0.7,0.45); lockMarker.visible=false; scene.add(lockMarker);
+// compass arrow: points at the nearest unrescued citizen (yaw-only billboard)
+var compassG=new THREE.Group(), compassCone;
+(function(){
+  compassCone=new THREE.Mesh(GEO.cone,MAT.arrow);
+  compassCone.rotation.x=Math.PI/2; compassCone.scale.set(0.55,0.7,0.55); compassCone.position.z=1.1;
+  compassG.add(compassCone); compassG.visible=false; scene.add(compassG);
+})();
+// reusable beam flares (no per-shot allocation)
+var muzzleFlare=new THREE.Mesh(GEO.ball,MAT.flare);
+muzzleFlare.scale.set(0.5,0.5,0.5); muzzleFlare.visible=false; scene.add(muzzleFlare);
+var impactFlare=new THREE.Mesh(GEO.ball,MAT.flare);
+impactFlare.scale.set(0.9,0.9,0.9); impactFlare.visible=false; scene.add(impactFlare);
+
+/* ---- gameplay platforms (collidable boxes) ---- */
+var levelGroup=new THREE.Group(); scene.add(levelGroup); // rebuilt per run; contents use shared assets
+var platGroup=levelGroup;
+var solids=[]; // {min,max,mesh,edge,fade,noFade}
+// materials cloned per platform (tracked in levelDisposables and disposed on
+// rebuild); shared bases in MAT are never disposed.
+var levelDisposables=[];
+function addSolid(x,y,z,w,h,d,mat,edgeMat,noFade){
+  // unit-box scaled: zero geometry allocation per platform
+  var bm=(mat||MAT.platA), em=(edgeMat||MAT.edgeA), edge=null;
+  if(!noFade){ bm=bm.clone(); em=em.clone(); levelDisposables.push(bm,em); }
+  var m=new THREE.Mesh(GEO.box, bm);
+  m.scale.set(w,h,d); m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true;
+  platGroup.add(m);
+  if(!noFade){
+    // neon top edge (skipped for the ground slab: a 680-unit trim plate
+    // would carpet the whole street — that was the infamous white ground)
+    edge=new THREE.Mesh(GEO.box, em);
+    edge.scale.set(w+0.15,0.22,d+0.15); edge.position.set(x,y+h/2+0.08,z); platGroup.add(edge);
+  }
+  solids.push({min:new THREE.Vector3(x-w/2,y-h/2,z-d/2),max:new THREE.Vector3(x+w/2,y+h/2,z+d/2),
+    mesh:m, edge:edge, fade:1, noFade:!!noFade});
+  return m;
+}
+function buildPlatforms(){
+  // levelGroup is fresh each run, so nothing to clear here
+  addSolid(WORLD_LEN/2-10,-2.5,0,WORLD_LEN+220,5,70,MAT.slab,MAT.edgeA,true); // ground slab (never fades)
+  var defs=[
+    [10,3.4,0,6,0.8,6],[20,6,0,6,0.8,6],[30,3.4,4,5,0.8,5],
+    [46,5.5,0,7,0.8,6,0x64748b],[60,3.4,0,6,0.8,6],
+    [72,5.5,-3,5,0.8,5],[82,3.4,3,7,0.8,6,0x64748b],
+    [96,5,0,6,0.8,6],[108,3.4,0,6,0.8,6],
+    [122,5,0,7,0.8,6,0x64748b],[136,3.4,0,6,0.8,6],
+    [150,5,0,6,0.8,6],[164,3.4,-3,6,0.8,6,0x64748b],
+    [178,5,3,6,0.8,6],[192,3.4,0,8,0.8,7],
+    [30,11,-2,4,0.7,4],[100,10.5,2,4,0.7,4],[150,10,0,4,0.7,4]
+  ];
+  defs.forEach(function(d){
+    var steel=d[6]===0x64748b;
+    addSolid(d[0],d[1],d[2],d[3],d[4],d[5], steel?MAT.platB:MAT.platA, steel?MAT.edgeB:MAT.edgeA);
+  });
+}
+
+/* ---- hero (Superman-like, primitives only) ---- */
+function buildHero(){
+  var g=new THREE.Group();
+  // YXZ = yaw, then pitch about the FACING axis, then roll. XYZ (the default)
+  // pitches about the world X axis, which lay the hero sideways whenever the
+  // yaw wasn't ~0. This was the broken flight pose in the screenshot.
+  g.rotation.order='YXZ';
+  var blue=new THREE.MeshLambertMaterial({color:0x2563eb});
+  var darkBlue=new THREE.MeshLambertMaterial({color:0x1e40af});
+  var red=new THREE.MeshLambertMaterial({color:0xdc2626});
+  var skin=new THREE.MeshLambertMaterial({color:0xf2c89b});
+  var black=new THREE.MeshLambertMaterial({color:0x111827});
+
+  var torso=new THREE.Mesh(new THREE.BoxGeometry(1.05,1.25,0.62),blue);
+  torso.position.y=1.7; torso.castShadow=true; g.add(torso); g.userData.torso=torso;
+  var belt=new THREE.Mesh(new THREE.BoxGeometry(1.08,0.18,0.65),red);
+  belt.position.y=1.12; g.add(belt);
+  var buckle=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.16,0.05),new THREE.MeshBasicMaterial({color:0xffd700}));
+  buckle.position.set(0,1.12,0.34); g.add(buckle);
+  var shield=new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.55),
+    new THREE.MeshBasicMaterial({map:shieldTex, transparent:true}));
+  shield.position.set(0,1.85,0.33); g.add(shield);
+
+  // head subgroup pivoted at the neck: when the body pitches horizontal in
+  // flight, the head counter-pitches so the hero looks where he's going
+  // instead of face-planting toward the ground.
+  var headG=new THREE.Group(); headG.position.set(0,2.55,0); g.add(headG);
+  g.userData.headG=headG;
+  var head=new THREE.Mesh(new THREE.SphereGeometry(0.42,20,16),skin);
+  head.position.y=0.2; head.castShadow=true; headG.add(head);
+  var hair=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.28,0.7),black);
+  hair.position.set(0,0.5,-0.05); headG.add(hair);
+  var eyeL=new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8),new THREE.MeshBasicMaterial({color:0xff2211}));
+  eyeL.position.set(-0.14,0.23,0.37); eyeL.visible=false; headG.add(eyeL);
+  var eyeR=eyeL.clone(); eyeR.position.x=0.14; headG.add(eyeR);
+  g.userData.eyes=[eyeL,eyeR];
+
+  function limb(mat,r,len){
+    var m=new THREE.Mesh(new THREE.CylinderGeometry(r,r*0.85,len,10),mat);
+    m.castShadow=true; return m;
+  }
+  var armL=limb(blue,0.17,1.0); armL.position.set(-0.72,1.8,0); g.add(armL);
+  var armR=limb(blue,0.17,1.0); armR.position.set(0.72,1.8,0); g.add(armR);
+  var fistL=new THREE.Mesh(new THREE.SphereGeometry(0.17,10,10),skin);
+  fistL.position.set(-0.72,1.2,0); g.add(fistL);
+  var fistR=fistL.clone(); fistR.position.set(0.72,1.2,0); g.add(fistR);
+  var legL=limb(darkBlue,0.2,1.0); legL.position.set(-0.28,0.55,0); g.add(legL);
+  var legR=limb(darkBlue,0.2,1.0); legR.position.set(0.28,0.55,0); g.add(legR);
+  var bootL=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.3,0.55),red);
+  bootL.position.set(-0.28,0.12,0.06); g.add(bootL);
+  var bootR=bootL.clone(); bootR.position.x=0.28; g.add(bootR);
+  // regalia: pauldrons, gold wristbands + boot trim, cape clasp (all static)
+  var gold=new THREE.MeshBasicMaterial({color:0xffd700});
+  var padL=new THREE.Mesh(new THREE.SphereGeometry(0.24,12,10),blue);
+  padL.position.set(-0.72,2.32,0); padL.castShadow=true; g.add(padL);
+  var padR=padL.clone(); padR.position.x=0.72; g.add(padR);
+  var bandL=new THREE.Mesh(new THREE.CylinderGeometry(0.19,0.19,0.14,10),gold);
+  bandL.position.set(0,-0.38,0); armL.add(bandL); // children ride the arm swing
+  var bandR=bandL.clone(); armR.add(bandR);
+  var trimL=new THREE.Mesh(new THREE.BoxGeometry(0.36,0.08,0.57),gold);
+  trimL.position.set(-0.28,0.26,0.06); g.add(trimL);
+  var trimR=trimL.clone(); trimR.position.x=0.28; g.add(trimR);
+  var clasp=new THREE.Mesh(new THREE.SphereGeometry(0.12,10,8),gold);
+  clasp.position.set(0,2.28,-0.3); g.add(clasp);
+  g.userData.armL=armL; g.userData.armR=armR; g.userData.fistL=fistL; g.userData.fistR=fistR;
+  g.userData.legL=legL; g.userData.legR=legR;
+  g.userData.flashMats=[blue,darkBlue,red,skin]; // hurt flash (unique to hero, safe to tint)
+
+  // cape: tailored shape — narrow at the shoulders, wider at the hem — hung
+  // FROM the shoulders (top edge ~2.27) so it drapes the back instead of
+  // floating up through the head. Slight back-tilt keeps the top off the
+  // neck and lets the hem fall free.
+  var capeGeo=new THREE.PlaneGeometry(1.15,1.9,4,7);
+  (function(){
+    var pa=capeGeo.attributes.position;
+    for(var ci=0;ci<pa.count;ci++){
+      var vy=pa.getY(ci), nx=(vy+0.95)/1.9; // 0 hem -> 1 top
+      pa.setX(ci,pa.getX(ci)*(0.62+0.38*(1-nx)));
+    }
+  })();
+  var cape=new THREE.Mesh(capeGeo,new THREE.MeshLambertMaterial({color:0xb91c1c, side:THREE.DoubleSide}));
+  cape.position.set(0,1.32,-0.36); cape.rotation.x=-0.08; cape.castShadow=true;
+  g.add(cape); g.userData.cape=cape;
+  g.userData.capeBase=capeGeo.attributes.position.array.slice();
+  return g;
+}
+var hero=buildHero(); scene.add(hero);
+
+/* ---- heat-vision beam (infinite) ---- */
+var beamOuter=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,1,10,1,true),
+  new THREE.MeshBasicMaterial({color:0xff5032, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false}));
+var beamInner=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,1,8,1,true),
+  new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false}));
+scene.add(beamOuter); scene.add(beamInner);
+var beamAlpha=0;
+var lastBeamT=-1, lastBeamHit=false; // test telemetry: where the beam stopped
+var UP_Y=new THREE.Vector3(0,1,0);
+function setBeam(a,b,alpha){
+  beamAlpha=alpha;
+  [beamOuter,beamInner].forEach(function(m){ m.visible=alpha>0.02; });
+  if(alpha<=0.02) return;
+  var dir=_bdir.subVectors(b,a);
+  var len=dir.length();
+  if(len<0.001) return;
+  dir.normalize();
+  [beamOuter,beamInner].forEach(function(m){
+    m.position.copy(a).addScaledVector(dir,len/2);
+    m.quaternion.setFromUnitVectors(UP_Y,dir);
+    m.scale.set(1,len,1);
+  });
+  beamOuter.material.opacity=0.5*alpha; beamInner.material.opacity=0.95*alpha;
+}
+// slab-method ray vs AABB: returns entry t, or -1 on miss. Used so heat
+// vision stops at the first wall instead of passing through the world.
+var _rb={t:0};
+function rayBoxT(ox,oy,oz,dx,dy,dz,mn,mx){
+  var t0=0, t1=1e9, inv, a, b, t;
+  inv=1/(dx||1e-9); a=(mn.x-ox)*inv; b=(mx.x-ox)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  inv=1/(dy||1e-9); a=(mn.y-oy)*inv; b=(mx.y-oy)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  inv=1/(dz||1e-9); a=(mn.z-oz)*inv; b=(mx.z-oz)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  if(t0>t1||t1<0) return -1;
+  t=t0<0?0:t0; _rb.t=t; return t;
+}
+
+/* ---- pickups / civilians / enemies ---- */
+var crystals=[], civilians=[], enemies=[];
+var checkpoints=[]; // checkpoint pylons (see buildCheckpoints)
+var finishGroup=new THREE.Group();
+var finishRefs={ring:null, beacon:null, earth:null};
+var slamRing=null, slamMode='hide', slamT=0, slamHit=false, slamX=0, slamZ=0;
+/* throwable street rubble (UNDEFEATED-style grab-and-throw).
+   One shared mesh per chunk: ground -> carried overhead -> flying -> gone
+   (respawns). States live on the entries; no allocation at runtime. */
+var rubble=[], carrying=null, throwCD=0;
+var RUBBLE_SPOTS=[[30,6],[70,-6],[110,5],[150,-5],[185,4],[60,-38],[120,38],[170,-44]];
+function buildRubble(){
+  rubble.length=0;
+  for(var i=0;i<RUBBLE_SPOTS.length;i++){
+    var m=new THREE.Mesh(GEO.box,MAT.rubble);
+    m.scale.set(0.95,0.7,0.85); m.rotation.y=Math.random()*3;
+    m.position.set(RUBBLE_SPOTS[i][0],0.45,RUBBLE_SPOTS[i][1]);
+    m.castShadow=true; levelGroup.add(m);
+    rubble.push({mesh:m, sx:RUBBLE_SPOTS[i][0], sz:RUBBLE_SPOTS[i][1],
+      x:RUBBLE_SPOTS[i][0], y:0.45, z:RUBBLE_SPOTS[i][1],
+      state:'ground', vx:0, vy:0, vz:0, life:0, respawnT:0});
+  }
+}
+function tryGrab(){
+  if(state!=='play'||paused||carrying) return;
+  var best=null, bd=4.5*4.5;
+  for(var i=0;i<rubble.length;i++){ var r=rubble[i];
+    if(r.state!=='ground') continue;
+    var dx=r.x-P.pos.x, dy=r.y-(P.pos.y+1), dz=r.z-P.pos.z;
+    var d2=dx*dx+dy*dy+dz*dz;
+    if(d2<bd){ bd=d2; best=r; }
+  }
+  if(best){ carrying=best; best.state='carried';
+    beep(500,0.12,'square',0.08,900);
+    addFloater(best.x,2.5,best.z,'GRABBED','#e2e8f0'); }
+}
+function dropRubble(){
+  if(!carrying) return;
+  var r=carrying; carrying=null;
+  r.state='ground'; r.x=P.pos.x+Math.sin(P.facing)*1.5; r.z=P.pos.z+Math.cos(P.facing)*1.5; r.y=0.45;
+  r.mesh.position.set(r.x,r.y,r.z);
+}
+function throwRubble(dx,dy,dz){
+  if(!carrying) return;
+  var r=carrying; carrying=null;
+  if(dx===undefined){ camera.getWorldDirection(_v1); dx=_v1.x; dy=_v1.y; dz=_v1.z; }
+  r.vx=dx*42; r.vy=dy*42+5; r.vz=dz*42;
+  r.state='flying'; r.life=3; throwCD=0.3;
+  P.punchT=0.24; // the throw reuses the punch swing
+  beep(300,0.25,'sawtooth',0.1,900);
+}
+
+function buildLevel(){
+  // drop the whole previous level in one node, disposing only the
+  // per-platform material clones (shared geo/mats persist by design).
+  scene.remove(levelGroup);
+  for(var di=0;di<levelDisposables.length;di++) levelDisposables[di].dispose();
+  levelDisposables.length=0;
+  levelGroup=new THREE.Group(); scene.add(levelGroup); platGroup=levelGroup;
+  solids.length=0;
+  for(var ci=0;ci<citySolids.length;ci++) solids.push(citySolids[ci]);
+  crystals.length=0; civilians.length=0; enemies.length=0; checkpoints.length=0;
+  clearParts(); clearBullets();
+  slamMode='hide'; slamT=0;
+  buildPlatforms();
+
+  var cx=[10,20,30,46,60,72,82,96,108,122,150,164,30,100];
+  var cyy=[5.2,7.8,5.2,7.3,5.2,7.3,5.2,6.8,5.2,6.8,6.8,5.2,12.6,12.1];
+  var czz=[0,0,0,0,0,-38,38,0,0,0,0,38,0,-40];
+  cx.forEach(function(x,i){
+    var m=new THREE.Mesh(GEO.octa,MAT.crystal);
+    m.position.set(x,cyy[i],czz[i]); m.castShadow=true;
+    var halo=new THREE.Mesh(GEO.halo,MAT.halo);
+    m.add(halo); levelGroup.add(m);
+    crystals.push({mesh:m, taken:false, t:i*0.7, x:x});
+  });
+  var civXZ=[[14,1.5],[52,-40],[92,40],[132,-40],[178,0]];
+  civXZ.forEach(function(cxz,i){
+    var x=cxz[0], cz=cxz[1];
+    var g=new THREE.Group();
+    var body=new THREE.Mesh(GEO.civBody,MAT.civShirts[i%MAT.civShirts.length]);
+    body.position.y=0.9; body.castShadow=true; g.add(body);
+    var hd=new THREE.Mesh(GEO.civHead,MAT.civSkin);
+    hd.position.y=1.7; hd.castShadow=true; g.add(hd);
+    var mark=new THREE.Mesh(GEO.mark,MAT.markRed);
+    mark.position.set(0.7,2.5,0); g.add(mark);
+    // sky beacon: citizens stay findable from anywhere on the course
+    var beacon=new THREE.Mesh(GEO.pillar,MAT.beaconCiv);
+    beacon.scale.set(1.0,30,1.0); beacon.position.y=15; g.add(beacon);
+    g.position.set(x,0.6,cz);
+    levelGroup.add(g);
+    civilians.push({mesh:g, body:body, mark:mark, beacon:beacon, rescued:false, t:i, x:x, z:cz});
+  });
+
+  function walker(x,z,brute){
+    var g=new THREE.Group();
+    var s=brute?1.35:1.0;
+    var bmat=brute?MAT.bruteBody:MAT.walkBody;
+    var body=new THREE.Mesh(GEO.box, bmat);
+    body.scale.set(1.2*s,1.3*s,0.9*s);
+    body.position.y=1.2*s; body.castShadow=true; g.add(body);
+    var eye=new THREE.Mesh(GEO.eyeBox,MAT.eyeRed);
+    eye.scale.set(s,1,1); eye.position.set(0,1.55*s,0.48*s); g.add(eye);
+    var tag=new THREE.Mesh(GEO.tag, brute?MAT.tagOrange:MAT.tagBlue);
+    tag.position.set(0,0.7*s,0.48*s); g.add(tag);
+    // stub limbs for the waddle cycle (shared geo/mats, posed per-frame)
+    var legL=new THREE.Mesh(GEO.box,bmat);
+    legL.scale.set(0.24*s,0.55*s,0.24*s); legL.position.set(-0.3*s,0.28*s,0); g.add(legL);
+    var legR=legL.clone(); legR.position.x=0.3*s; g.add(legR);
+    var armL=new THREE.Mesh(GEO.box,bmat);
+    armL.scale.set(0.2*s,0.7*s,0.2*s); armL.position.set(-0.78*s,1.2*s,0); g.add(armL);
+    var armR=armL.clone(); armR.position.x=0.78*s; g.add(armR);
+    g.position.set(x,0,z);
+    levelGroup.add(g);
+    return {mesh:g, legL:legL, legR:legR, armL:armL, armR:armR, eyeM:eye, eyeS:s,
+      type:brute?'brute':'walker', x:x, y:0, z:z, vx:0, vy:0, vz:0,
+      w:1.2*s, h:1.9*s, hp:brute?60:34, maxhp:brute?60:34, alive:true, dying:0,
+      base:(Math.random()>0.5?2.2:-2.2), t:Math.random()*5, score:brute?250:100,
+      spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1*s};
+  }
+  function drone(x,y,z,hp){
+    var g=new THREE.Group();
+    var body=new THREE.Mesh(GEO.droneBall,MAT.droneBody);
+    body.castShadow=true; g.add(body);
+    var core=new THREE.Mesh(GEO.core,MAT.eyeRed);
+    g.add(core);
+    var bar=new THREE.Mesh(GEO.rotor,MAT.rotor);
+    bar.position.y=0.75; g.add(bar);
+    g.position.set(x,y,z); levelGroup.add(g);
+    return {mesh:g, core:core, rotor:bar, type:'drone', x:x, y:y, z:z, vx:0,
+      hp:hp, maxhp:hp, alive:true, t:Math.random()*5, baseY:y, baseX:x, baseZ:z, score:150,
+      range:9, shootT:1+Math.random(), spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1,
+      px:0, pz:0};
+  }
+  // volt-dasher: telegraphs (white-hot core + rising tone) then dives at you
+  function dasher(x,y,z){
+    var g=new THREE.Group();
+    var body=new THREE.Mesh(GEO.cone,MAT.droneBody);
+    body.castShadow=true; g.add(body);
+    var core=new THREE.Mesh(GEO.core,MAT.eyeRed);
+    core.position.y=-0.2; g.add(core);
+    g.position.set(x,y,z); levelGroup.add(g);
+    return {mesh:g, core:core, type:'dasher', x:x, y:y, z:z, vx:0, vy:0, vz:0,
+      hp:26, maxhp:26, alive:true, t:Math.random()*5, baseY:y, baseX:x, score:175,
+      range:8, spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1,
+      mode:'hover', stT:1.5+Math.random(), dx:0, dy:0, dz:0, shootT:0};
+  }
+  enemies.push(walker(24,0,false),walker(55,-40,false),drone(36,9,0,22),
+    dasher(70,6,0),walker(76,40,false),drone(88,8,-40,22),walker(102,0,true),
+    drone(118,8,40,22),walker(128,-40,false),dasher(140,6,-40),drone(142,9,0,30),
+    walker(158,0,true),walker(172,40,false));
+  var bossG=new THREE.Group();
+  var bb=new THREE.Mesh(GEO.box,MAT.bossBody);
+  bb.scale.set(2.4,2.8,1.8);
+  bb.position.y=2.2; bb.castShadow=true; bossG.add(bb);
+  var beye=new THREE.Mesh(GEO.eyeBox,MAT.eyeRed);
+  beye.scale.set(2.2,1.8,1); beye.position.set(0,2.9,0.95); bossG.add(beye);
+  for(var s=0;s<4;s++){ var spike=new THREE.Mesh(GEO.cone,MAT.spike);
+    spike.scale.set(0.6,0.75,0.6); spike.position.set(-0.9+s*0.6,3.9,0); bossG.add(spike); }
+  bossG.position.set(200,0,0); levelGroup.add(bossG);
+  enemies.push({mesh:bossG, eye:beye, type:'boss', x:200, y:0, z:0, vx:0, vy:0, vz:0, w:2.4, h:4.2,
+    hp:150, maxhp:150, alive:true, base:2.0, t:0, score:1000, spawnX:200, spawnZ:0, flash:0, r:2.2,
+    atkCD:2.5, tele:0, enraged:false});
+
+  // Beacon Tower finish (rebranded from Daily Planet): ring glows red while
+  // locked, green once citizens are safe and the Mech is down.
+  finishGroup=new THREE.Group(); levelGroup.add(finishGroup);
+  var ped=new THREE.Mesh(GEO.pillar,MAT.finishPed);
+  ped.scale.set(1.6,5,1.6);
+  ped.position.set(214,2.5,0); ped.castShadow=true; finishGroup.add(ped);
+  var bld=new THREE.Mesh(GEO.box,MAT.finishBld);
+  bld.scale.set(5,2.4,2.4);
+  bld.position.set(214,1.4,0); bld.castShadow=true; finishGroup.add(bld);
+  var earth=new THREE.Mesh(GEO.earth,MAT.earth);
+  earth.position.set(214,6.4,0); finishGroup.add(earth);
+  var ring=new THREE.Mesh(GEO.ring,MAT.ringRed);
+  ring.scale.set(1.9,1.9,1.9);
+  ring.position.copy(earth.position); ring.rotation.x=1.1; finishGroup.add(ring);
+  var beacon=new THREE.PointLight(0xff5040,1.2,30); beacon.position.copy(earth.position); finishGroup.add(beacon);
+  finishRefs={ring:ring, beacon:beacon, earth:earth};
+  buildCheckpoints();
+  buildRubble();
+  // reusable telegraphed-slam ring for the boss
+  slamRing=new THREE.Mesh(GEO.ring,MAT.slam);
+  slamRing.rotation.x=-Math.PI/2; slamRing.visible=false; levelGroup.add(slamRing);
+}
+
+function buildCheckpoints(){
+  [['Market Plaza',98],['Foundry Gate',160]].forEach(function(cp){
+    var g=new THREE.Group();
+    var py=new THREE.Mesh(GEO.pillar,MAT.cpOff);
+    py.scale.set(2.4,3,2.4); py.position.y=1.5; py.castShadow=true; g.add(py);
+    var ring=new THREE.Mesh(GEO.ring,MAT.cpOff);
+    ring.rotation.x=Math.PI/2; ring.position.y=0.3; ring.scale.set(2.4,2.4,2.4); g.add(ring);
+    var beam=new THREE.Mesh(GEO.pillar,MAT.beamBlue);
+    beam.scale.set(0.9,26,0.9); beam.position.y=14; g.add(beam);
+    // centered on the path (z=0): rings you run through, not past
+    g.position.set(cp[1],0,0); levelGroup.add(g);
+    checkpoints.push({name:cp[0], x:cp[1], z:0, mesh:g, solid:[py,ring], beam:beam, active:false});
+  });
+}
+
+/* ================= PLAYER OBJECT ================= */
+var P={pos:new THREE.Vector3(2,3,0), vel:new THREE.Vector3(), w:0.9, h:2.6,
+  facing:1, onGround:false, coyote:0, buf:0, fly:false, boost:false,
+  flight:100, heat:100, hyper:100, hp:100,
+  invuln:0, punchT:0, punchCD:0, capeT:0, runT:0, prevJump:false, aim:new THREE.Vector3(1,0,0),
+  squash:0, stretch:0, hurtF:0, flinch:0, boostR:0, surge:0};
+
+function resetPlayer(){
+  P.pos.set(2,3,0); P.vel.set(0,0,0);
+  P.hp=100; P.flight=100; P.heat=100; P.hyper=100;
+  P.invuln=0; P.fly=false; P.boost=false; P.onGround=false;
+  P.coyote=0; P.buf=0; P.punchT=0; P.punchCD=0;
+  P.squash=0; P.stretch=0; P.hurtF=0; P.flinch=0; P.boostR=0; P.surge=0;
+  visLift=0;
+  if(typeof hero!=='undefined'){
+    hero.rotation.set(0,0,0);
+    if(hero.userData.headG) hero.userData.headG.rotation.x=0;
+  }
+}
+function startGame(){
+  buildLevel(); resetPlayer();
+  score=0; gameTime=0; rescued=0; trauma=0; endLock=0; beamAlpha=0;
+  lives=3; deaths=0; checkpoint={x:2,y:3,z:0};
+  bossIntro=false; bossDown=false; bossDieT=0; denyCD=0; finishDenyT=0;
+  boomCharge=0; boomArmed=true; boomT=0; setLock(null);
+  carrying=null; throwCD=0;
+  if(boomRing) boomRing.visible=false;
+  if(bossBarEl) bossBarEl.style.display='none';
+  setBeam(new THREE.Vector3(),new THREE.Vector3(),0);
+  orbitYaw=0; orbitPitch=0; camYaw=Math.PI/2; mouseDown=false; prevMouseDown=false; punchQueued=false;
+  state='play'; paused=false;
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('end').classList.add('hidden');
+  document.getElementById('pause').classList.add('hidden');
+  showBanner('Rescue 5 citizens → wreck the Mech → ignite the Beacon','',4);
+  beep(440,0.14,'square',0.08,880);
+}
+function endGame(won){
+  state=won?'win':'dead'; endLock=0.7; mouseDown=false; P.boost=false; setLock(null);
+  document.getElementById('end').classList.remove('hidden');
+  document.getElementById('endTitle').textContent=won?'🎉 SOLARIS CITY SAVED!':'💥 DEFEATED...';
+  document.getElementById('endTitle').style.color=won?'#4ade80':'#f87171';
+  var bonus=won?Math.floor(P.hp*5+(P.flight+P.heat)*1+rescued*200):0;
+  if(won) score+=bonus;
+  var best=store.get('best',0), newBest=false;
+  if(won&&score>best){ best=score; store.set('best',best); newBest=true; }
+  document.getElementById('endText').innerHTML=
+    (won?'The Beacon burns bright over Solaris City. The Sunwarden prevails!':'Even wardens fall... but dawn always returns.')+
+    '<br><br><b style="color:#ffd700;font-size:20px">SCORE '+score+' • Citizens '+rescued+'/5 • '+Math.floor(gameTime)+'s</b>'+
+    '<br><span style="font-size:14px">💛 Lives left '+lives+' • 💀 Falls '+deaths+'</span>'+
+    (won?'<br><span style="font-size:13px">Includes rescue/health bonus +'+bonus+'</span>':'<br><span style="font-size:13px">Tip: hold SPACE in the air to fly. Solar cells recharge ✈ flight, 👁 heat and ⚡ hyper.</span>');
+  document.getElementById('bestText').textContent=won?(newBest?'🏆 NEW BEST!':'🏆 Best: '+best):(best>0?'🏆 Best: '+best:'');
+  if(won) sfx.win(); else sfx.lose();
+}
+// death with checkpoints: respawn costs a life + score; only the last life ends the run
+function onDeath(){
+  deaths++;
+  if(lives>1){
+    lives--; score=Math.max(0,score-200);
+    P.pos.set(checkpoint.x,checkpoint.y,checkpoint.z); P.vel.set(0,0,0);
+    P.hp=70; P.flight=60; P.heat=60; P.hyper=60;
+    P.invuln=2.5; P.fly=false; P.boost=false;
+    clearBullets();
+    for(var i=0;i<enemies.length;i++){ var e=enemies[i];
+      if(e.alive){ e.x=e.spawnX; e.z=e.spawnZ||0; e.vx=0; e.vz=0; if(e.type==='boss'){ e.tele=0; e.atkCD=2.5; } }
+    }
+    showBanner('RECOVERED — '+lives+(lives===1?' LIFE':' LIVES')+' LEFT (−200)','warn',2.6);
+    sfx.rescue();
+  } else { lives=0; endGame(false); }
+}
+
+/* ================= INPUT ================= */
+window.addEventListener('keydown',function(e){
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].indexOf(e.code)>=0) e.preventDefault();
+  if(!keys[e.code]){
+    if(e.code==='Enter'&&state!=='play'&&endLock<=0) startGame();
+    if((e.code==='KeyP'||e.code==='Escape')&&state==='play') setPause(!paused);
+    // event-queued punch: polling alone can miss taps shorter than one frame
+    if(e.code==='KeyJ'||e.code==='KeyX') punchQueued=true;
+    // Q grabs street rubble (or sets it back down); J / left-click throws it
+    if(e.code==='KeyQ'&&state==='play'&&!paused){ if(carrying) dropRubble(); else tryGrab(); }
+    if(e.code==='KeyM'){ settings.sound=!settings.sound; document.getElementById('set-sound').checked=settings.sound; syncSettings(); saveSettings(); }
+    if(e.code==='KeyF'){ try{ var fsEl=document.documentElement;
+        if(document.fullscreenElement){ var p=document.exitFullscreen(); if(p&&p.catch)p.catch(function(){}); }
+        else { var q=fsEl.requestFullscreen(); if(q&&q.catch)q.catch(function(){}); }
+      }catch(err){} }
+  }
+  keys[e.code]=true;
+});
+window.addEventListener('keyup',function(e){ keys[e.code]=false; });
+// Track the mouse on the whole window (not just the canvas) so aim and the
+// custom cursor never desync when moving fast or over HUD elements.
+window.addEventListener('mousemove',function(e){
+  mouseNDC.x=(e.clientX/window.innerWidth)*2-1;
+  mouseNDC.y=-(e.clientY/window.innerHeight)*2+1;
+  mousePX.x=e.clientX; mousePX.y=e.clientY; mouseSeen=true;
+  if(orbiting){ orbitYaw-=(e.clientX-lastMX)*0.005; orbitPitch-=(e.clientY-lastMY)*0.004;
+    orbitPitch=Math.max(-0.5,Math.min(0.7,orbitPitch)); lastMX=e.clientX; lastMY=e.clientY; }
+});
+canvas.addEventListener('mousedown',function(e){
+  if(state!=='play') return;
+  if(e.button===0) mouseDown=true;
+  if(e.button===1){ e.preventDefault(); toggleLock(); } // wheel-click: lock-on
+  if(e.button===2){ orbiting=true; lastMX=e.clientX; lastMY=e.clientY; }
+});
+canvas.addEventListener('auxclick',function(e){ if(e.button===1) e.preventDefault(); });
+window.addEventListener('mouseup',function(e){
+  if(e.button===0) mouseDown=false;
+  if(e.button===2) orbiting=false;
+});
+canvas.addEventListener('contextmenu',function(e){ e.preventDefault(); });
+document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('againBtn').addEventListener('click',function(){ if(endLock<=0) startGame(); });
+function bindT(id,prop){
+  var el=document.getElementById(id);
+  el.addEventListener('pointerdown',function(e){
+    e.preventDefault();
+    try{ el.setPointerCapture(e.pointerId); }catch(_){}
+    touch[prop]=true; el.classList.add('on'); markTouch();
+    if(state!=='play'&&endLock<=0) startGame();
+  });
+  var off=function(e){ touch[prop]=false; el.classList.remove('on'); };
+  el.addEventListener('pointerup',off); el.addEventListener('pointercancel',off); el.addEventListener('lostpointercapture',off);
+}
+bindT('tF','f'); bindT('tB','b'); bindT('tL','l'); bindT('tR','r'); bindT('tJ','j'); bindT('tP','p'); bindT('tE','e'); bindT('tH','h'); bindT('tDive','d');
+document.getElementById('tPause').addEventListener('click',function(){ if(state==='play') setPause(true); });
+// touch aim: drag anywhere on the playfield (not on buttons) to move the
+// crosshair; the 👁 button fires toward it. Pen counts as touch here.
+var aimTouchId=null;
+function aimFromClient(cx,cy){
+  mouseNDC.x=(cx/window.innerWidth)*2-1; mouseNDC.y=-(cy/window.innerHeight)*2+1;
+  mousePX.x=cx; mousePX.y=cy; mouseSeen=true;
+}
+// touch tap: grab rubble under the tap, or throw what you're carrying at it
+function handleTap(cx,cy){
+  if(state!=='play'||paused) return;
+  raycaster.setFromCamera({x:(cx/window.innerWidth)*2-1, y:-(cy/window.innerHeight)*2+1},camera);
+  var d=raycaster.ray.direction, o=raycaster.ray.origin;
+  if(carrying){ var L=Math.hypot(d.x,d.y,d.z)||1; throwRubble(d.x/L,d.y/L,d.z/L); throwCD=0.3; return; }
+  var best=null, bt=1e9;
+  for(var i=0;i<rubble.length;i++){ var r=rubble[i];
+    if(r.state!=='ground') continue;
+    var px=r.x-P.pos.x, pz=r.z-P.pos.z;
+    if(px*px+pz*pz>49) continue; // must be near the hero, not just under the tap
+    var wx=r.x-o.x, wy=r.y-o.y, wz=r.z-o.z;
+    var t=wx*d.x+wy*d.y+wz*d.z;
+    if(t<0||t>60) continue;
+    var qx=wx-d.x*t, qy=wy-d.y*t, qz=wz-d.z*t;
+    if(qx*qx+qy*qy+qz*qz<2.25&&t<bt){ bt=t; best=r; }
+  }
+  if(best){ carrying=best; best.state='carried';
+    beep(500,0.12,'square',0.08,900);
+    addFloater(best.x,2.5,best.z,'GRABBED','#e2e8f0'); }
+}
+canvas.addEventListener('pointerdown',function(e){
+  if(e.pointerType!=='mouse') markTouch();
+  if(e.pointerType==='mouse') return; // mouse keeps the mousedown path below
+  if(state!=='play') return;
+  aimTouchId=e.pointerId;
+  try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
+  aimFromClient(e.clientX,e.clientY);
+  tapT0=performance.now(); tapX=e.clientX; tapY=e.clientY;
+  // double-tap the playfield to toggle target lock (touch equivalent of wheel-click)
+  var nowT=performance.now();
+  if(nowT-lastTapT<350&&state==='play') toggleLock();
+  lastTapT=nowT;
+});
+canvas.addEventListener('pointermove',function(e){
+  if(e.pointerId===aimTouchId&&state==='play') aimFromClient(e.clientX,e.clientY);
+});
+function endAim(e){ if(e.pointerId===aimTouchId) aimTouchId=null; }
+// quick tap (not drag) on touch = grab nearby rubble, or throw toward the tap
+var tapT0=0, tapX=0, tapY=0;
+canvas.addEventListener('pointerup',function(e){
+  if(e.pointerType==='mouse'||state!=='play'||paused) return;
+  var dtms=performance.now()-tapT0;
+  var moved=Math.hypot(e.clientX-tapX,e.clientY-tapY);
+  if(dtms<300&&moved<14) handleTap(e.clientX,e.clientY);
+});
+canvas.addEventListener('pointerup',endAim); canvas.addEventListener('pointercancel',endAim);
+// suppress synthetic mouse events from canvas touches (buttons are separate DOM)
+canvas.addEventListener('touchstart',function(e){ e.preventDefault(); },{passive:false});
+// losing focus clears every held input so nothing sticks; pausing protects runs
+function clearInputs(){
+  keys={}; mouseDown=false; prevMouseDown=false; orbiting=false; aimTouchId=null;
+  for(var k in touch) touch[k]=false;
+  punchQueued=false; punchPrev=false;
+  var on=document.querySelectorAll('.tbtn.on');
+  for(var i=0;i<on.length;i++) on[i].classList.remove('on');
+}
+window.addEventListener('blur',function(){ clearInputs(); if(state==='play'&&!paused) setPause(true); });
+document.addEventListener('visibilitychange',function(){ if(document.hidden){ clearInputs(); if(state==='play'&&!paused) setPause(true); } });
+// adaptive hints: touch users get touch wording from the first touch on
+var HINT_TOUCH='<b>Pad</b> move &nbsp;•&nbsp; <b>⤒</b> hold to <b>FLY</b> &nbsp;•&nbsp; <b>👁</b> + drag to aim &nbsp;•&nbsp; double-tap: lock target &nbsp;•&nbsp; <b>⤓</b> dive &nbsp;•&nbsp; <b>⚡</b> boost &nbsp;•&nbsp; <b>👊</b> punch';
+function markTouch(){
+  if(document.body.classList.contains('touch')) return;
+  document.body.classList.add('touch');
+  document.getElementById('hint').innerHTML=HINT_TOUCH;
+}
+try{ if(window.matchMedia&&matchMedia('(pointer:coarse)').matches) markTouch(); }catch(e){}
+
+function moveInput(){
+  var x=0,z=0;
+  if(keys.KeyW||keys.ArrowUp||touch.f) z-=1;
+  if(keys.KeyS||keys.ArrowDown||touch.b) z+=1;
+  if(keys.KeyA||keys.ArrowLeft||touch.l) x-=1;
+  if(keys.KeyD||keys.ArrowRight||touch.r) x+=1;
+  return {x:x,z:z};
+}
+function jumpHeld(){ return !!(keys.Space||touch.j); }
+function laserHeld(){ return mouseDown||keys.KeyK||touch.e; } // NOTE: KeyC is dive-only, never laser
+function boostKeyHeld(){ return !!(keys.ShiftLeft||keys.ShiftRight||touch.h); }
+// wheel-click target lock: nearest foe roughly ahead (or close in any direction)
+function setLock(e){
+  locked=e;
+  if(lockMarker) lockMarker.visible=!!e;
+  if(crossEl) crossEl.classList.toggle('locked',!!e);
+  if(e){ beep(880,0.12,'square',0.07,1320); }
+}
+function toggleLock(){
+  if(state!=='play'||paused) return;
+  if(locked){ setLock(null); return; }
+  camera.getWorldDirection(_v1);
+  var best=null, bd=1e18;
+  for(var i=0;i<enemies.length;i++){ var e=enemies[i];
+    if(!e.alive) continue;
+    var dx=e.x-P.pos.x, dy=(e.y+1.2)-(P.pos.y+1.4), dz=e.z-P.pos.z;
+    var d2=dx*dx+dy*dy+dz*dz;
+    if(d2>2025) continue; // 45u max
+    var L=Math.sqrt(d2)||1;
+    var dot=(dx*_v1.x+dy*_v1.y+dz*_v1.z)/L;
+    if(dot>0.25||d2<144){ if(d2<bd){ bd=d2; best=e; } }
+  }
+  if(best){ setLock(best); addFloater(best.x,best.y+2.6,best.z,'LOCKED','#ffd700'); }
+}
+
+/* Push ground entities (and the camera) out of building footprints — but only
+   when vertically overlapping, so rooftop landings still work. y0/y1 is the
+   vertical span to test (point query when equal). */
+function pushOutBld(e,r,y0,y1){
+  for(var i=0;i<solids.length;i++){ var s=solids[i];
+    if(!s.bld) continue;
+    if(y1<s.min.y||y0>s.max.y) continue;
+    var nx=Math.max(s.min.x,Math.min(e.x,s.max.x));
+    var nz=Math.max(s.min.z,Math.min(e.z,s.max.z));
+    var dx=e.x-nx, dz=e.z-nz, d2=dx*dx+dz*dz;
+    if(d2<r*r){
+      if(d2>1e-6){ var d=Math.sqrt(d2); e.x=nx+dx/d*r; e.z=nz+dz/d*r; }
+      else e.x=s.min.x-r;
+    }
+  }
+}
+
+/* ================= COLLISION (AABB) ================= */
+var tmpMin=new THREE.Vector3(), tmpMax=new THREE.Vector3();
+function playerAABB(){
+  tmpMin.set(P.pos.x-P.w/2, P.pos.y, P.pos.z-P.w/2);
+  tmpMax.set(P.pos.x+P.w/2, P.pos.y+P.h, P.pos.z+P.w/2);
+  return {min:tmpMin,max:tmpMax};
+}
+function collide(dt){
+  // integrate X
+  P.pos.x+=P.vel.x*dt;
+  var pb=playerAABB(), i, s;
+  for(i=0;i<solids.length;i++){ s=solids[i];
+    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
+      if(P.vel.x>0) P.pos.x=s.min.x-P.w/2-0.001;
+      else if(P.vel.x<0) P.pos.x=s.max.x+P.w/2+0.001;
+      P.vel.x=0; pb=playerAABB();
+    }
+  }
+  // integrate Z (city bounds: three avenues + blocks, z in [-66,66])
+  P.pos.z+=P.vel.z*dt;
+  P.pos.z=Math.max(-66,Math.min(66,P.pos.z));
+  pb=playerAABB();
+  for(i=0;i<solids.length;i++){ s=solids[i];
+    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
+      if(P.vel.z>0) P.pos.z=s.min.z-P.w/2-0.001;
+      else if(P.vel.z<0) P.pos.z=s.max.z+P.w/2+0.001;
+      P.vel.z=0; pb=playerAABB();
+    }
+  }
+  // integrate Y
+  var wasGround=P.onGround, fallV=P.vel.y;
+  P.pos.y+=P.vel.y*dt;
+  P.onGround=false;
+  pb=playerAABB();
+  for(i=0;i<solids.length;i++){ s=solids[i];
+    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
+      if(P.vel.y<=0 && P.pos.y>=s.max.y-1.2){ P.pos.y=s.max.y+0.001; P.vel.y=0; P.onGround=true; }
+      else if(P.vel.y>0){ P.pos.y=s.min.y-P.h-0.001; P.vel.y=0; }
+      pb=playerAABB();
+    }
+  }
+  if(P.onGround){ P.coyote=0.12;
+    if(!wasGround&&fallV<-22){ spawnParts(P.pos.x,P.pos.y+0.2,P.pos.z,8,0xe2e8f0,7,0.45); P.squash=0.18; }
+    // hard landing from flight height kicks dust + a thud you feel
+    if(!wasGround&&fallV<-30){ spawnParts(P.pos.x,P.pos.y+0.3,P.pos.z,18,0xcbb98a,11,0.6);
+      if(!RM) trauma=Math.min(0.7,trauma+0.2); beep(70,0.25,'sine',0.1,40); }
+  }
+  else if(P.coyote>0) P.coyote-=dt;
+}
+
+/* ================= UPDATE ================= */
+var raycaster=new THREE.Raycaster();
+var camFwd=new THREE.Vector3(), eyePos=new THREE.Vector3(), aimDir=new THREE.Vector3(), farPt=new THREE.Vector3();
+var fwd2=new THREE.Vector3(), right2=new THREE.Vector3();
+
+function hurtPlayer(dmg,fromX){
+  if(settings.god) return; // god mode: no damage, no knockback
+  if(P.invuln>0||state!=='play') return;
+  P.hp=Math.max(0,P.hp-dmg); P.invuln=0.9; P.hurtF=0.2; P.flinch=0.3;
+  trauma=Math.min(0.7,trauma+0.5); sfx.hurt();
+  spawnParts(P.pos.x,P.pos.y+1.5,P.pos.z,10,0xef4444,9,0.6);
+  var d=document.getElementById('dmg'); d.style.opacity=0.9; setTimeout(function(){d.style.opacity=0;},140);
+  var dir=P.pos.x<(fromX||P.pos.x)?-1:1;
+  P.vel.x=dir*9; P.vel.y=Math.max(P.vel.y,7);
+}
+function damageEnemy(e,dmg){
+  if(!e.alive) return;
+  e.hp=Math.max(0,e.hp-dmg); e.flash=0.12;
+  if(e.hp<=0){
+    e.alive=false; score+=e.score; sfx.hit(); trauma=Math.min(0.7,trauma+0.3);
+    spawnParts(e.x,e.y+1.2,e.z,18,e.type==='drone'||e.type==='dasher'?0xcbd5e1:0x4ade80,10,0.7);
+    addFloater(e.x,e.y+2.4,e.z,'+'+e.score,'#ffd700');
+    // minions tip over and sink (death anim in the enemy loop); the boss
+    // stays visible for its burn-off and is hidden when that ends.
+    if(e.type==='boss'){ if(slamRing) slamRing.visible=false; }
+    else e.dying=0.38;
+    if(e.type==='boss') startBossDefeat();
+  }
+}
+// boss defeat sequence: 1.6s of escalating bursts, then the Beacon unlocks
+function startBossDefeat(){
+  if(bossDown) return;
+  bossDown=true; bossDieT=1.6;
+  if(slamRing) slamRing.visible=false;
+  slamMode='hide';
+  if(bossBarEl) bossBarEl.style.display='none';
+  showBanner('💥 UMBRA-MECH DESTROYED!','good',3);
+  trauma=Math.min(0.7,trauma+0.55);
+  beep(90,0.7,'sawtooth',0.12,40);
+}
+function bossObj(){ for(var i=0;i<enemies.length;i++) if(enemies[i].type==='boss') return enemies[i]; return null; }
+function bossAlive(){ var b=bossObj(); return !!(b&&b.alive); }
+
+function update(dt){
+  gameTime+=dt;
+  var i;
+  // punch edge
+  var pDown=!!(keys.KeyJ||keys.KeyX||touch.p);
+  if(pDown&&!punchPrev) punchQueued=true;
+  punchPrev=pDown;
+
+  var mv=moveInput(), J=jumpHeld();
+  lastMV.x=mv.x; lastMV.z=mv.z;
+  // camera-relative move (right = forward x up)
+  camera.getWorldDirection(camFwd); camFwd.y=0;
+  if(camFwd.lengthSq()<0.001) camFwd.set(1,0,0); else camFwd.normalize();
+  right2.crossVectors(camFwd,new THREE.Vector3(0,1,0)).normalize();
+  var wishX=0, wishZ=0;
+  if(mv.x!==0||mv.z!==0){
+    var il=1/Math.max(1,Math.hypot(mv.x,mv.z));
+    var fx=-mv.z*il, rx=mv.x*il; // W(-z input) => forward
+    wishX=(camFwd.x*fx+right2.x*rx)*MOVE_SPEED;
+    wishZ=(camFwd.z*fx+right2.z*rx)*MOVE_SPEED;
+  }
+  var rate=P.onGround?26:(P.fly?17:8);
+  // ⚡ hyperspeed: hold Shift for +100% move speed on its own bar (ground + air)
+  var wantBoost=boostKeyHeld()&&(P.hyper>1||settings.god)&&(mv.x!==0||mv.z!==0||P.fly);
+  P.boost=wantBoost;
+  // gradual spool-up: ~0.45s to full ×2 thrust, snappy release. Speed, FOV,
+  // pose and particles all key off the ramp so it feels like spooling up.
+  P.boostR+=((P.boost?1:0)-P.boostR)*Math.min(1,(P.boost?2.2:5)*dt);
+  if(P.boostR<0.01) P.boostR=0; if(P.boostR>0.995) P.boostR=1;
+  var speedMul=(P.fly?1.28:1)*(1+(BOOST_MULT-1)*P.boostR)*(P.surge>0?1.25:1)*(carrying?0.92:1);
+  if(P.boost){
+    if(!settings.god) P.hyper=Math.max(0,P.hyper-BOOST_DRAIN*dt);
+    if(Math.random()<0.1+0.5*P.boostR) spawnParts(P.pos.x,P.pos.y+1.4,P.pos.z,1,0xc4b5fd,4,0.35);
+  }
+  if(P.surge>0) P.surge-=dt;
+  P.vel.x+=(wishX*speedMul-P.vel.x)*Math.min(1,rate*dt);
+  P.vel.z+=(wishZ*speedMul-P.vel.z)*Math.min(1,rate*dt);
+  // locked on: face the mark while strafing (UNDEFEATED-style); else face travel
+  if(locked&&locked.alive) P.facing=Math.atan2(locked.x-P.pos.x,locked.z-P.pos.z);
+  else if(Math.hypot(P.vel.x,P.vel.z)>0.6) P.facing=Math.atan2(P.vel.x,P.vel.z);
+
+  // jump buffer + coyote
+  if(J&&!P.prevJump) P.buf=0.14; else if(P.buf>0) P.buf-=dt;
+  P.prevJump=J;
+  if(P.buf>0&&(P.onGround||P.coyote>0)){
+    P.vel.y=JUMP_V; P.onGround=false; P.coyote=0; P.buf=0; P.stretch=0.15;
+    sfx.jump(); spawnParts(P.pos.x,P.pos.y+0.2,P.pos.z,8,0xffffff,7,0.45);
+  }
+  var wasFlying=P.fly;
+  // Superman-style flight on its OWN ✈ bar: once airborne and holding jump
+  // past the apex you break into flight, then STAY flying (hover) until you
+  // land or the flight bar runs dry. Climbing sips ~3/s (≈33s per bar, ~4x
+  // the original), hovering barely touches it.
+  var wantFly=!P.onGround&&(P.flight>1||settings.god)&&(P.fly||(J&&P.vel.y<10));
+  if(wantFly) P.fly=true;
+  if(P.onGround||(P.flight<=0.5&&!settings.god)) P.fly=false;
+
+  if(P.fly){
+    // vertical: hold Space to climb, C (or ⤓) to dive, release to hover
+    var descending=!!(keys.KeyC||keys.ControlLeft||touch.d);
+    var targetV=J?FLY_MAX_UP:(descending?-9:0.6);
+    P.vel.y+=(targetV-P.vel.y)*Math.min(1,4.2*dt);
+    if(P.vel.y>FLY_MAX_UP) P.vel.y=FLY_MAX_UP;
+    if(P.vel.y<-14) P.vel.y=-14;
+    // thrust costs full rate, hovering sips it — skilled pilots fly much further
+    var drain=J?FLY_DRAIN:(descending?FLY_DIVE_DRAIN:FLY_HOVER_DRAIN);
+    if(!settings.god) P.flight=Math.max(0,P.flight-drain*dt);
+    if(Math.random()<0.35) spawnParts(P.pos.x,P.pos.y+0.3,P.pos.z,1,0xbfe9ff,2,0.45);
+    if(!wasFlying){ // takeoff burst + feedback
+      spawnParts(P.pos.x,P.pos.y+0.6,P.pos.z,14,0xffffff,8,0.5);
+      beep(220,0.22,'sawtooth',0.06,520);
+    }
+  } else {
+    P.vel.y+=GRAV*dt;
+    if(keys.KeyC&&!P.onGround) P.vel.y-=22*dt; // C = dedicated dive (S is pure movement)
+    if(P.vel.y<MAX_FALL) P.vel.y=MAX_FALL;
+    if(P.onGround){
+      P.flight=Math.min(100,P.flight+FLIGHT_REGEN*dt);
+      P.hyper=Math.min(100,P.hyper+BOOST_REGEN*dt);
+    }
+  }
+  // heat bar recharges whenever you are NOT firing (fast on ground, slow in air)
+  if(!(laserHeld()&&P.heat>1.5)) P.heat=Math.min(100,P.heat+((P.onGround?HEAT_REGEN:HEAT_AIR_REGEN)*dt));
+  // hyper trickle-regens in air so long flights can still sprint in bursts
+  if(!P.boost&&!P.onGround) P.hyper=Math.min(100,P.hyper+BOOST_AIR_REGEN*dt);
+  // SONIC BOOM: sustain flight-superspeed ~0.5s to break the barrier —
+  // shockwave ring, speed surge, FOV punch. Rearms when you throttle down.
+  if(P.fly&&P.boost&&P.boostR>0.8){
+    boomCharge+=dt;
+    if(boomCharge>=0.5&&boomArmed){
+      boomArmed=false; boomT=0.7; boomCount++;
+      P.surge=0.8;
+      boomRing.position.set(P.pos.x,P.pos.y+1.4,P.pos.z);
+      boomRing.quaternion.copy(camera.quaternion);
+      boomRing.visible=true;
+      addFloater(P.pos.x,P.pos.y+3.6,P.pos.z,'SONIC BOOM!','#fef3c7');
+      spawnParts(P.pos.x,P.pos.y+1.4,P.pos.z,26,0xffffff,16,0.7);
+      if(!RM) trauma=Math.min(0.7,trauma+0.3);
+      beep(60,0.8,'sawtooth',0.14,30); beep(1200,0.3,'sine',0.06,200);
+    }
+  } else {
+    boomCharge=0;
+    if(!P.fly||!P.boost) boomArmed=true;
+  }
+  if(boomT>0){
+    boomT-=dt;
+    var bk=1+Math.max(0,0.7-boomT)*24;
+    boomRing.scale.set(bk,bk,1);
+    boomRingMat.opacity=Math.max(0,boomT/0.7)*0.85;
+    if(boomT<=0) boomRing.visible=false;
+  }
+  if(P.invuln>0) P.invuln-=dt;
+  if(P.punchCD>0) P.punchCD-=dt;
+  if(P.punchT>0) P.punchT-=dt;
+  if(throwCD>0) throwCD-=dt;
+  if(P.squash>0) P.squash-=dt;
+  if(P.stretch>0) P.stretch-=dt;
+  if(P.hurtF>0) P.hurtF-=dt;
+  if(P.flinch>0) P.flinch-=dt;
+  P.capeT+=dt; P.runT+=dt;
+
+  // punch (0.34s cadence + small forward lunge so hits feel committed).
+  // inputs buffer through the cooldown, and the strike soft-locks toward the
+  // nearest foe in a forward cone so 3D lineup never feels hopeless.
+  if(punchQueued&&P.punchCD<=0){
+    punchQueued=false; P.punchT=0.24; P.punchCD=0.34; sfx.punch();
+    if(carrying){ throwRubble(); throwCD=0.3; } // J with rubble overhead = throw
+    else {
+    if(locked&&locked.alive){
+      // locked foe wins outright (generous range: the camera already frames it)
+      var ldx=locked.x-P.pos.x, ldz=locked.z-P.pos.z;
+      if(ldx*ldx+ldz*ldz<36) P.facing=Math.atan2(ldx,ldz);
+    } else {
+      var bl=1e9;
+      for(i=0;i<enemies.length;i++){ var cand=enemies[i];
+        if(!cand.alive) continue;
+        var cdx=cand.x-P.pos.x, cdz=cand.z-P.pos.z, cd2=cdx*cdx+cdz*cdz;
+        if(cd2<20){
+          var da=Math.atan2(cdx,cdz)-P.facing;
+          while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
+          if(Math.abs(da)<0.7&&cd2<bl){ bl=cd2; P.facing=Math.atan2(cdx,cdz); }
+        }
+      }
+    }
+    var fx2=Math.sin(P.facing), fz=Math.cos(P.facing);
+    var hit=false;
+    for(i=0;i<enemies.length;i++){ var e=enemies[i];
+      if(!e.alive) continue;
+      var dx=e.x-P.pos.x, dz=e.z-P.pos.z, dy=(e.y+1)- (P.pos.y+1.4);
+      var fwd=dx*fx2+dz*fz;
+      if(fwd>0&&fwd<3.4&&Math.abs(dx*fz-dz*fx2)<1.6&&Math.abs(dy)<2.4){
+        damageEnemy(e,P.fly?30:18); hit=true;
+        spawnParts(e.x,e.y+1.4,e.z,8,0xffd23f,9,0.45);
+        // knockback stays inside the next punch's reach: no whack-a-mole chase
+        if(e.type==='drone'){ e.px=(e.px||0)+fx2*5; e.pz=(e.pz||0)+fz*5; }
+        else if(e.type==='boss'){ e.vx=(e.vx||0)+fx2*3; e.vz=(e.vz||0)+fz*3; }
+        else { e.vx=(e.vx||0)+fx2*4.5; e.vz=(e.vz||0)+fz*4.5; }
+      }
+    }
+    if(hit){ trauma=Math.min(0.7,trauma+0.25); P.vel.x+=fx2*1.5; P.vel.z+=fz*1.5; }
+    }
+  } // (a tap queued during cooldown stays buffered and fires on ready: no dropped inputs)
+
+  // ---- HEAT VISION: infinite range, but stops at the first wall/target ----
+  // Aim = camera ray through the *actual cursor position*, so the beam, the
+  // damage and the crosshair all agree. Beam starts just in front of the eyes
+  // so it never clips through the hero's head. All math reuses module temps.
+  // left-click while carrying throws the rubble instead of firing
+  if(carrying&&mouseDown&&!prevMouseDown&&throwCD<=0){ throwRubble(); throwCD=0.3; }
+  prevMouseDown=mouseDown;
+  var firing=laserHeld()&&(P.heat>1.5||settings.god)&&throwCD<=0;
+  eyePos.set(P.pos.x,P.pos.y+2.55,P.pos.z);
+  muzzleFlare.visible=false; impactFlare.visible=false;
+  lastBeamT=-1; lastBeamHit=false;
+  if(firing){
+    if(locked&&locked.alive){
+      // locked target overrides the cursor: the beam tracks the mark
+      aimDir.set(locked.x-eyePos.x,(locked.y+1.2)-eyePos.y,locked.z-eyePos.z);
+      if(aimDir.lengthSq()<0.01) camera.getWorldDirection(aimDir);
+      aimDir.normalize();
+    } else {
+      raycaster.setFromCamera(mouseSeen?mouseNDC:{x:0,y:0},camera);
+      aimDir.copy(raycaster.ray.direction);
+      if(aimDir.lengthSq()<0.001) camera.getWorldDirection(aimDir);
+      aimDir.normalize();
+    }
+    P.aim.copy(aimDir);
+    if(Math.abs(aimDir.x)+Math.abs(aimDir.z)>0.05) P.facing=Math.atan2(aimDir.x,aimDir.z);
+    if(!settings.god) P.heat=Math.max(0,P.heat-LASER_DRAIN*dt);
+    laserSfx();
+    _muzzle.copy(eyePos).addScaledVector(aimDir,0.7);
+    // nearest wall along the ray (slab-tested against every solid)
+    var wallT=BEAM_LEN, si;
+    for(si=0;si<solids.length;si++){ var sb=solids[si];
+      var wt=rayBoxT(_muzzle.x,_muzzle.y,_muzzle.z,aimDir.x,aimDir.y,aimDir.z,sb.min,sb.max);
+      if(wt>=0&&wt<wallT) wallT=wt;
+    }
+    // nearest target along the ray; the beam ends just past it
+    var firstT=BEAM_LEN;
+    for(i=0;i<enemies.length;i++){ var en0=enemies[i];
+      if(!en0.alive) continue;
+      var ex0=en0.x-_muzzle.x, ey0=(en0.y+1.2)-_muzzle.y, ez0=en0.z-_muzzle.z;
+      var pr0=ex0*aimDir.x+ey0*aimDir.y+ez0*aimDir.z;
+      if(pr0<-1||pr0>wallT) continue;
+      var qx0=ex0-aimDir.x*pr0, qy0=ey0-aimDir.y*pr0, qz0=ez0-aimDir.z*pr0;
+      if(Math.sqrt(qx0*qx0+qy0*qy0+qz0*qz0)<en0.r+1.1&&pr0<firstT) firstT=pr0;
+    }
+    var endT=Math.min(wallT,firstT+1.2,BEAM_LEN);
+    lastBeamT=endT; lastBeamHit=endT<BEAM_LEN-1;
+    farPt.copy(_muzzle).addScaledVector(aimDir,endT);
+    beamAlpha=Math.min(1,beamAlpha+10*dt);
+    setBeam(_muzzle,farPt,beamAlpha);
+    muzzleFlare.position.copy(_muzzle); muzzleFlare.visible=true;
+    // damage everything up to the stop point (nothing behind a wall)
+    for(i=0;i<enemies.length;i++){ var en=enemies[i];
+      if(!en.alive) continue;
+      var cx=en.x-_muzzle.x, cy=(en.y+1.2)-_muzzle.y, cz=en.z-_muzzle.z;
+      var proj=cx*aimDir.x+cy*aimDir.y+cz*aimDir.z;
+      if(proj<-1||proj>endT+0.3||proj>wallT-0.1) continue;
+      var px=cx-aimDir.x*proj, py=cy-aimDir.y*proj, pz=cz-aimDir.z*proj;
+      if(Math.sqrt(px*px+py*py+pz*pz)<en.r+1.1){
+        damageEnemy(en,LASER_DPS*dt);
+        // impact flash exactly where the beam passes the enemy, not at its center
+        if(Math.random()<0.6) spawnParts(
+          _muzzle.x+aimDir.x*proj, _muzzle.y+aimDir.y*proj, _muzzle.z+aimDir.z*proj,
+          2,0xff6a3d,7,0.3);
+      }
+    }
+    if(endT<BEAM_LEN-1){ // stopped on something: plant a flare there
+      impactFlare.position.copy(_muzzle).addScaledVector(aimDir,endT);
+      var fl=0.8+Math.sin(animT*40)*0.25; impactFlare.scale.set(fl,fl,fl);
+      impactFlare.visible=true;
+    }
+    if(crossEl) crossEl.classList.add('firing');
+  } else {
+    beamAlpha=Math.max(0,beamAlpha-8*dt);
+    if(beamAlpha<=0.01){ setBeam(eyePos,eyePos,0); }
+    else setBeam(beamPosA(),beamPosB(),beamAlpha);
+    if(crossEl) crossEl.classList.remove('firing');
+  }
+
+  collide(dt);
+  if(P.pos.y<-12){ hurtPlayer(18); P.pos.set(Math.max(2,P.pos.x-8),8,P.pos.z); P.vel.set(0,0,0); }
+
+  // pickups
+  for(i=0;i<crystals.length;i++){ var c=crystals[i];
+    if(c.taken) continue; c.t+=dt;
+    c.mesh.rotation.y+=2.2*dt; c.mesh.position.y+=Math.sin(c.t*3)*0.008;
+    var ddx=c.mesh.position.x-P.pos.x, ddz=c.mesh.position.z-P.pos.z, ddy=c.mesh.position.y-(P.pos.y+1.4);
+    if(ddx*ddx+ddz*ddz<4.2&&Math.abs(ddy)<2.6){
+      c.taken=true; c.mesh.visible=false;
+      P.flight=Math.min(100,P.flight+34); P.heat=Math.min(100,P.heat+34); P.hyper=Math.min(100,P.hyper+25);
+      score+=50; sfx.pickup(); spawnParts(c.mesh.position.x,c.mesh.position.y,c.mesh.position.z,10,0xfde047,8,0.6);
+    }
+  }
+  for(i=0;i<civilians.length;i++){ var cv=civilians[i];
+    if(cv.rescued) continue; cv.t+=dt;
+    cv.mark.position.y=2.5+Math.sin(cv.t*5)*0.15;
+    cv.beacon.rotation.y+=dt*0.6;
+    var qx=cv.mesh.position.x-P.pos.x, qz=cv.mesh.position.z-P.pos.z;
+    if(qx*qx+qz*qz<9&&Math.abs(P.pos.y-cv.mesh.position.y)<3.4){
+      cv.rescued=true; rescued++; cv.mark.visible=false; cv.beacon.visible=false;
+      cv.body.material=MAT.civSaved;
+      score+=300; sfx.rescue();
+      addFloater(cv.mesh.position.x,cv.mesh.position.y+3,'RESCUED! +300','#4ade80');
+      spawnParts(cv.mesh.position.x,2,cv.mesh.position.z,16,0x4ade80,9,0.7);
+      if(rescued>=5) showBanner('ALL CITIZENS SAFE! Now wreck the UMBRA-MECH 🤖','good',3);
+    }
+  }
+
+  // ---- throwable rubble: carried overhead, thrown, impacts, respawns ----
+  if(carrying){
+    carrying.x=P.pos.x; carrying.y=P.pos.y+3.4+Math.sin(animT*4)*0.15; carrying.z=P.pos.z;
+    carrying.mesh.position.set(carrying.x,carrying.y,carrying.z);
+    carrying.mesh.rotation.y+=3*dt;
+  }
+  for(i=0;i<rubble.length;i++){ var rb=rubble[i];
+    if(rb.state==='flying'){
+      rb.vy-=30*dt; rb.x+=rb.vx*dt; rb.y+=rb.vy*dt; rb.z+=rb.vz*dt;
+      rb.life-=dt; rb.mesh.position.set(rb.x,rb.y,rb.z); rb.mesh.rotation.x+=7*dt;
+      var impact=false;
+      for(var j=0;j<enemies.length;j++){ var te=enemies[j];
+        if(!te.alive) continue;
+        var tdx=te.x-rb.x, tdz=te.z-rb.z, tdy=(te.y+1.2)-rb.y;
+        if(tdx*tdx+tdz*tdz<4.8&&Math.abs(tdy)<2.6){
+          damageEnemy(te,45);
+          if(te.type==='drone'){ te.px=(te.px||0)+rb.vx*0.35; te.pz=(te.pz||0)+rb.vz*0.35; }
+          else { te.vx=(te.vx||0)+rb.vx*0.35; if(te.vz!==undefined) te.vz=(te.vz||0)+rb.vz*0.35; }
+          addFloater(te.x,te.y+2.6,te.z,'SMASH!','#fdba74');
+          impact=true; break;
+        }
+      }
+      if(!impact&&(rb.y<0.4||rb.life<=0)){
+        impact=true;
+        var pdx2=rb.x-P.pos.x, pdz2=rb.z-P.pos.z;
+        if(pdx2*pdx2+pdz2*pdz2<625) beep(80,0.3,'sawtooth',0.1,40); // audible thud nearby
+      }
+      if(impact){
+        spawnParts(rb.x,Math.max(0.5,rb.y),rb.z,16,0x9aa3b2,10,0.6);
+        if(!RM) trauma=Math.min(0.7,trauma+0.2);
+        rb.state='gone'; rb.respawnT=15; rb.mesh.visible=false;
+      }
+    } else if(rb.state==='gone'){
+      rb.respawnT-=dt;
+      if(rb.respawnT<=0){ rb.state='ground'; rb.x=rb.sx; rb.y=0.45; rb.z=rb.sz;
+        rb.mesh.position.set(rb.x,rb.y,rb.z); rb.mesh.rotation.set(0,0,0); rb.mesh.visible=true; }
+    }
+  }
+
+  // ---- enemies: full 3D movement, spawn grace, telegraphed attacks ----
+  // grace keeps the starting area safe for the first seconds of a run
+  var grace=gameTime<5;
+  for(i=0;i<enemies.length;i++){ var ee=enemies[i];
+    if(!ee.alive){
+      // death animation: tip backward and sink, then vanish (boss excluded)
+      if(ee.dying>0){
+        ee.dying-=dt;
+        var dk=1-Math.max(0,ee.dying)/0.38;
+        ee.mesh.rotation.x=-dk*1.5;
+        ee.mesh.position.y=ee.y-dk*0.6;
+        if(ee.dying<=0){ ee.mesh.visible=false; ee.dying=0; }
+      }
+      continue;
+    }
+    ee.t+=dt; if(ee.flash>0) ee.flash-=dt;
+    // hit flash: scale pulse instead of touching shared materials (auto-clears)
+    var fs=ee.flash>0?1+ee.flash*3:1;
+    if(ee.type==='boss'&&ee.tele>0) fs*=1+Math.sin(ee.t*30)*0.05; // telegraph throb
+    ee.mesh.scale.set(fs,fs,fs);
+    if(ee.type==='walker'||ee.type==='brute'||ee.type==='boss'){
+      // UNDEFEATED-style enrage: under 40% the Mech speeds up and slams faster
+      if(ee.type==='boss'&&!ee.enraged&&ee.hp<ee.maxhp*0.4){
+        ee.enraged=true;
+        showBanner('UMBRA-MECH ENRAGED!','warn',2.4);
+        beep(90,0.6,'sawtooth',0.12,60);
+      }
+      var spd=ee.type==='boss'?(ee.enraged?3.4:2.6):(ee.base||2.2);
+      if(ee.type==='boss'){
+        // chase X, strafe toward the player's lane, stay in the arena
+        var bdx=P.pos.x-ee.x;
+        ee.x+=Math.sign(bdx)*spd*dt+(ee.vx||0)*dt;
+        ee.z+=(Math.max(-1,Math.min(1,(P.pos.z-ee.z)*0.6))*2.2+(ee.vz||0))*dt;
+        if(ee.x<175){ ee.x=175; } if(ee.x>210){ ee.x=210; }
+        ee.z=Math.max(-10,Math.min(10,ee.z));
+        ee.vx=(ee.vx||0)*Math.max(0,1-6*dt); ee.vz=(ee.vz||0)*Math.max(0,1-6*dt);
+        ee.atkCD-=dt;
+        if(ee.tele>0){ // TELEGRAAPHED SLAM: red ring grows at his feet…
+          ee.tele-=dt;
+          ee.eye.material=MAT.eyeWhite;
+          if(slamRing){ slamRing.visible=true; slamRing.position.set(ee.x,0.18,ee.z);
+            var tr=1+(0.8-ee.tele)*9; slamRing.scale.set(tr,tr,1); }
+          if(ee.tele<=0){ // …then the shockwave. Airborne players are safe: JUMP!
+            ee.eye.material=MAT.eyeRed;
+            slamMode='blast'; slamT=0.55; slamHit=false; slamX=ee.x; slamZ=ee.z;
+            if(slamRing) slamRing.visible=true;
+            ee.atkCD=ee.enraged?2.2:3.5;
+            spawnParts(ee.x,0.6,ee.z,22,0xff6a3d,12,0.7);
+            trauma=Math.min(0.7,trauma+0.55); beep(70,0.5,'sawtooth',0.12,35);
+          }
+        }
+        else if(Math.abs(bdx)<11&&ee.y<=0.1&&ee.atkCD<=0&&!grace){
+          ee.tele=0.8; beep(200,0.7,'sawtooth',0.07,900); // rising warning tone
+        }
+        if(Math.abs(bdx)<12&&ee.y<=0.1&&Math.random()<0.008) ee.vy=11; // rare hop keeps the arena lively
+      } else {
+        ee.x+=(spd+(ee.vx||0))*dt;
+        ee.vx=(ee.vx||0)*Math.max(0,1-6*dt);
+        if(ee.x-ee.spawnX>7||ee.x-ee.spawnX<-7) ee.base*=-1;
+        // lane drift around the home avenue, never into the blocks
+        ee.z+=(Math.sin(ee.t*0.7+ee.ph)*1.6+(ee.vz||0))*dt;
+        ee.vz=(ee.vz||0)*Math.max(0,1-6*dt);
+        if(ee.z>ee.spawnZ+6){ ee.z=ee.spawnZ+6; } if(ee.z<ee.spawnZ-6){ ee.z=ee.spawnZ-6; }
+        ee.z=Math.max(-64,Math.min(64,ee.z));
+      }
+      ee.vy=(ee.vy||0)+GRAV*0.9*dt; ee.y+=ee.vy*dt;
+      if(ee.y<=0){ ee.y=0; ee.vy=0; }
+      pushOutBld(ee,1.1,ee.y,ee.y+2); // slide around towers, never through them
+      ee.mesh.position.set(ee.x,ee.y,ee.z);
+      ee.mesh.rotation.y=Math.sin(ee.t*2)*0.1+(ee.type==='boss'?(ee.x<P.pos.x?0.2:-0.2):0);
+      // waddle cycle + eye throb for foot troops (the boss stomps, not waddles)
+      if(ee.type!=='boss'){
+        var wsw=Math.sin(ee.t*(ee.type==='brute'?6.5:9));
+        ee.legL.rotation.x=wsw*0.55; ee.legR.rotation.x=-wsw*0.55;
+        ee.armL.rotation.x=-wsw*0.4; ee.armR.rotation.x=wsw*0.4;
+        ee.mesh.position.y+=Math.abs(Math.sin(ee.t*9))*0.06;
+        ee.eyeM.scale.x=ee.eyeS*(1+0.1*Math.sin(ee.t*6));
+        if(ee.type==='brute'&&Math.random()<0.02) spawnParts(ee.x,0.2,ee.z,2,0x9aa3b2,4,0.4);
+      }
+      else ee.mesh.position.y+=Math.abs(Math.sin(ee.t*3))*0.1; // boss road-stomp
+      var ex=ee.x-P.pos.x, ez=ee.z-P.pos.z, ey=ee.y-P.pos.y;
+      if(!grace&&ex*ex+ez*ez<(ee.type==='boss'?5.5:3.4)&&Math.abs(ey)<2.8&&P.invuln<=0)
+        hurtPlayer(ee.type==='boss'?14:(ee.type==='brute'?10:6),ee.x);
+    } else if(ee.type==='drone'){
+      // elliptical patrols around the home avenue + positional punch knockback
+      ee.x=ee.baseX+Math.cos(ee.t*0.55+ee.ph)*ee.range*0.6+(ee.px||0);
+      ee.z=ee.baseZ+Math.sin(ee.t*0.45+ee.ph)*4+(ee.pz||0);
+      ee.px=(ee.px||0)*Math.max(0,1-5*dt); ee.pz=(ee.pz||0)*Math.max(0,1-5*dt);
+      ee.y=ee.baseY+Math.sin(ee.t*2.4)*1.2;
+      ee.mesh.position.set(ee.x,ee.y,ee.z);
+      // bank into the patrol curve + spin the rotor bar
+      ee.mesh.rotation.z=-Math.cos(ee.t*0.55+ee.ph)*0.22;
+      ee.mesh.rotation.x=Math.cos(ee.t*0.45+ee.ph)*0.15;
+      if(ee.rotor) ee.rotor.rotation.y+=12*dt;
+      ee.shootT-=dt;
+      var pdx=P.pos.x-ee.x;
+      if(!grace&&ee.shootT<=0&&Math.abs(pdx)<26&&P.pos.x>14){
+        ee.shootT=1.7+Math.random()*0.9;
+        _v1.set(P.pos.x-ee.x,(P.pos.y+1.2)-ee.y,P.pos.z-ee.z).normalize();
+        fireBullet(ee.x,ee.y,ee.z,_v1.x*11,_v1.y*11,_v1.z*11);
+        sfx.shoot();
+      }
+      var ddx2=ee.x-P.pos.x, ddz2=ee.z-P.pos.z;
+      if(!grace&&ddx2*ddx2+ddz2*ddz2<2.6&&Math.abs(ee.y-(P.pos.y+1.4))<2&&P.invuln<=0){ hurtPlayer(6,ee.x); P.vel.y=8; }
+    } else if(ee.type==='dasher'){
+      // volt-dasher: hover → flash telegraph → committed dive → recover
+      ee.stT-=dt;
+      if(ee.mode==='hover'){
+        ee.x+=(Math.sin(ee.t*0.9+ee.ph)*2)*dt;
+        ee.z+=(Math.cos(ee.t*0.7+ee.ph)*2)*dt;
+        ee.y+=(ee.baseY+Math.sin(ee.t*2)*0.8-ee.y)*Math.min(1,3*dt);
+        ee.core.material=MAT.eyeRed;
+        if(!grace&&ee.stT<=0&&Math.abs(P.pos.x-ee.x)<24){ ee.mode='tele'; ee.stT=0.7; beep(300,0.6,'square',0.06,1200); }
+      } else if(ee.mode==='tele'){
+        ee.core.material=(Math.floor(ee.t*14)%2===0)?MAT.eyeWhite:MAT.eyeRed; // strobe warning
+        if(ee.stT<=0){
+          _v1.set(P.pos.x-ee.x,(P.pos.y+1.2)-ee.y,P.pos.z-ee.z).normalize().multiplyScalar(22);
+          ee.dx=_v1.x; ee.dy=_v1.y; ee.dz=_v1.z;
+          ee.mode='dash'; ee.stT=0.55; sfx.shoot();
+        }
+      } else if(ee.mode==='dash'){
+        ee.x+=ee.dx*dt; ee.y+=ee.dy*dt; ee.z+=ee.dz*dt;
+        ee.core.material=MAT.eyeWhite;
+        if(Math.random()<0.5) spawnParts(ee.x,ee.y,ee.z,1,0xff6a3d,3,0.3);
+        var dhx=ee.x-P.pos.x, dhz=ee.z-P.pos.z;
+        if(dhx*dhx+dhz*dhz<2.2&&Math.abs(ee.y-(P.pos.y+1.2))<1.8&&P.invuln<=0){ hurtPlayer(9,ee.x); }
+        if(ee.stT<=0){ ee.mode='rest'; ee.stT=1.6; }
+      } else { // rest: drift home, vulnerable
+        ee.x+=(ee.baseX-ee.x)*Math.min(1,1.5*dt);
+        ee.y+=(ee.baseY-ee.y)*Math.min(1,1.5*dt);
+        ee.z+=(ee.spawnZ-ee.z)*Math.min(1,1.5*dt);
+        ee.core.material=MAT.eyeRed;
+        if(ee.stT<=0){ ee.mode='hover'; ee.stT=1.2+Math.random(); }
+      }
+      ee.x=Math.max(ee.spawnX-14,Math.min(ee.spawnX+14,ee.x));
+      ee.mesh.position.set(ee.x,ee.y,ee.z);
+      // dasher aims its cone along the dive vector, spins lazily while hovering
+      if(ee.mode==='dash'){
+        _v1.set(ee.dx,ee.dy,ee.dz);
+        if(_v1.lengthSq()>0.01){ _v1.normalize(); ee.mesh.quaternion.setFromUnitVectors(UPV,_v1); }
+      }
+      else { ee.mesh.rotation.y+=1.5*dt; }
+    }
+  }
+  // boss defeat burn-off: escalating bursts, then the wreck stays dark
+  if(bossDown&&bossDieT>0){
+    bossDieT-=dt;
+    var bd=bossObj();
+    if(bd){ spawnParts(bd.x+(Math.random()-0.5)*3,bd.y+Math.random()*3.5,bd.z+(Math.random()-0.5)*2,
+      3,[0xffd23f,0xff6a3d,0xffffff][Math.floor(Math.random()*3)],10,0.6);
+      bd.mesh.rotation.y+=6*dt;
+      if(bossDieT<=0){ bd.mesh.rotation.y=0; bd.mesh.rotation.x=0; bd.eye.material=MAT.walkBody; } // dark wreck stays on as a trophy
+    }
+  }
+  // boss shockwave ring: expands, hits grounded players once, then hides
+  if(slamMode==='blast'){
+    slamT-=dt;
+    var br=(0.55-Math.max(0,slamT))*22;
+    if(slamRing){ slamRing.visible=true; slamRing.position.set(slamX,0.18,slamZ); slamRing.scale.set(Math.max(0.1,br),Math.max(0.1,br),1); }
+    if(!slamHit){
+      var swx=P.pos.x-slamX, swz=P.pos.z-slamZ, swd=Math.sqrt(swx*swx+swz*swz);
+      if(Math.abs(swd-br)<1.3&&P.pos.y<2.5&&P.invuln<=0){ slamHit=true; hurtPlayer(14,slamX); P.vel.y=9; }
+    }
+    if(slamT<=0){ slamMode='hide'; if(slamRing) slamRing.visible=false; }
+  }
+  // pooled enemy bullets
+  for(i=0;i<BPOOL.length;i++){ var b=BPOOL[i];
+    if(!b.active) continue;
+    b.mesh.position.x+=b.vx*dt; b.mesh.position.y+=b.vy*dt; b.mesh.position.z+=b.vz*dt; b.life-=dt;
+    var bp=b.mesh.position;
+    var hitP=(bp.x-P.pos.x)*(bp.x-P.pos.x)+(bp.z-P.pos.z)*(bp.z-P.pos.z)<1.2&&Math.abs(bp.y-(P.pos.y+1.4))<1.6;
+    if(hitP&&P.invuln<=0){ hurtPlayer(5,bp.x); b.active=false; b.mesh.visible=false; continue; }
+    if(b.life<=0||bp.y<0){ b.active=false; b.mesh.visible=false; }
+  }
+  updateParts(dt);
+  // clouds drift
+  for(i=0;i<clouds.length;i++){ clouds[i].g.position.x+=(RM?clouds[i].sp*0.3:clouds[i].sp)*dt; if(clouds[i].g.position.x>WORLD_LEN+40) clouds[i].g.position.x=-40; }
+  if(finishRefs.earth) finishRefs.earth.rotation.y+=0.8*dt;
+
+  // camera shake decays (reduced-motion users never accumulate it)
+  trauma=Math.max(0,trauma-(RM?6:1.5)*dt);
+
+  // ---- progression ----
+  var open=rescued>=5&&bossDown;
+  // boss introduction the first time you near the arena
+  if(!bossIntro&&P.pos.x>165){
+    bossIntro=true;
+    if(bossBarEl) bossBarEl.style.display='block';
+    showBanner('⚠ UMBRA-MECH ONLINE — dodge the red ring!','warn',3.2);
+    beep(70,0.9,'sawtooth',0.12,45);
+  }
+  // boss bar follows the fight
+  var bb=bossObj();
+  if(bb&&bossBarEl){
+    if(!bossDown){
+      var bf=Math.max(0,bb.hp/bb.maxhp);
+      bossFillEl.style.width=(bf*100)+'%';
+      bossMeterEl.setAttribute('aria-valuenow',Math.round(bf*100));
+    } else bossBarEl.style.display='none';
+  }
+  // checkpoints: touch the ring, respawn here on a fall
+  for(i=0;i<checkpoints.length;i++){ var cp=checkpoints[i];
+    if(cp.active) continue;
+    var cdx=P.pos.x-cp.x, cdz=P.pos.z-cp.z;
+    if(cdx*cdx+cdz*cdz<25&&Math.abs(P.pos.y-1)<4){
+      cp.active=true;
+      checkpoint={x:cp.x,y:3,z:0};
+      for(var pi=0;pi<cp.solid.length;pi++) cp.solid[pi].material=MAT.cpOn;
+      cp.beam.material=MAT.beamGreen;
+      showBanner('✔ CHECKPOINT — '+cp.name,'good',2.4);
+      addFloater(cp.x,4,cp.z,'CHECKPOINT','#4ade80');
+      jingle([660,880],110,'sine',0.09);
+      spawnParts(cp.x,2,cp.z,14,0x4ade80,8,0.6);
+    }
+  }
+  // Beacon ring shows the lock state at a glance
+  if(finishRefs.ring){
+    var wantRing=(open||finishDenyT>0)?MAT.ringGreen:MAT.ringRed;
+    if(finishRefs.ring.material!==wantRing) finishRefs.ring.material=wantRing;
+    if(finishRefs.beacon) finishRefs.beacon.color.setHex(open?0x4ade80:0xff5040);
+    if(finishDenyT>0){ finishDenyT-=dt; var rp=1+Math.sin(animT*20)*0.12; finishRefs.ring.scale.set(1.9*rp,1.9*rp,1.9*rp); }
+  }
+  if(denyCD>0) denyCD-=dt;
+  // death is evaluated BEFORE victory: zero health can never win the same update
+  if(state==='play'&&P.hp<=0){ P.hp=0; onDeath(); return; }
+  var fdx=P.pos.x-214, fdz=P.pos.z-0;
+  if(state==='play'&&fdx*fdx+fdz*fdz<12&&Math.abs(P.pos.y-1)<5){
+    if(open){ endGame(true); return; }
+    if(denyCD<=0){
+      denyCD=2.5; finishDenyT=1.2;
+      var why=rescued<5?('Citizens '+rescued+'/5'):'';
+      if(!bossDown) why+=(why?' • ':'')+'Mech ACTIVE';
+      showBanner('🔒 BEACON LOCKED — '+why,'warn',2.5);
+      beep(160,0.25,'square',0.08,90);
+    }
+  }
+}
+var _ba=new THREE.Vector3(), _bb=new THREE.Vector3();
+function beamPosA(){ _ba.set(P.pos.x,P.pos.y+2.55,P.pos.z); return _ba; }
+function beamPosB(){ _bb.copy(_ba).addScaledVector(P.aim,BEAM_LEN); return _bb; }
+
+function updateMenu(dt){
+  gameTime+=dt*0.2;
+  for(var i=0;i<clouds.length;i++){ clouds[i].g.position.x+=(RM?clouds[i].sp*0.3:clouds[i].sp)*dt; if(clouds[i].g.position.x>WORLD_LEN+40) clouds[i].g.position.x=-40; }
+  if(finishRefs.earth) finishRefs.earth.rotation.y+=0.8*dt;
+  hero.position.set(8+Math.sin(gameTime*0.5)*2,3+Math.sin(gameTime*1.2)*0.6,0);
+  hero.rotation.y=Math.sin(gameTime*0.4)*0.4;
+}
+
+/* ================= HERO ANIMATION ================= */
+var visLift=0; // smoothed flight hover offset (no snap on takeoff/landing)
+function animateHero(dt,t){
+  var u=hero.userData;
+  var spd=Math.hypot(P.vel.x,P.vel.z);
+  // Full Superman prone pose: body pitched ~72° so the torso is horizontal.
+  // Rotating about the feet would swing the head down, so the visual rides
+  // +1.1 while flying — eased in/out so takeoff and touchdown don't pop.
+  visLift+=((P.fly?1.1:0)-visLift)*Math.min(1,8*dt);
+  hero.position.set(P.pos.x,P.pos.y+visLift,P.pos.z);
+  // face travel direction; only snap to laser aim while actually firing
+  var firingNow=laserHeld()&&(P.heat>1.5||settings.god)&&state==='play';
+  var targetYaw=(P.fly&&firingNow)?Math.atan2(P.aim.x,P.aim.z)
+    :(spd>0.8?Math.atan2(P.vel.x,P.vel.z):hero.rotation.y);
+  var dy=targetYaw-hero.rotation.y;
+  while(dy>Math.PI) dy-=Math.PI*2; while(dy<-Math.PI) dy+=Math.PI*2;
+  hero.rotation.y+=dy*Math.min(1,(P.fly?6:10)*dt);
+  // hyperspeed pushes the body even flatter for the dramatic streak look
+  // NOTE: +pitch leans the head toward local +Z (the model's front), i.e.
+  // head-first forward flight. Negative would fly head-backwards.
+  // grounded: lean into the run; airborne arcs stay neutral for readability
+  var bR=P.boostR;
+  var targetPitch=P.fly?(1.25+0.2*bR):(P.onGround?Math.min(0.16,spd*0.012):0);
+  hero.rotation.x+=(targetPitch-hero.rotation.x)*Math.min(1,4.2*dt);
+  if(P.flinch>0) hero.rotation.x-=0.5*Math.min(1,P.flinch/0.15); // hit jolt
+  var bankTarget=(!RM&&P.fly)?Math.max(-0.45,Math.min(0.45,-dy*1.2)):0;
+  hero.rotation.z+=(bankTarget-hero.rotation.z)*Math.min(1,5*dt);
+  // run bob + idle breathing (frozen under reduced motion)
+  if(!RM){
+    if(P.onGround&&spd>1) hero.position.y+=Math.abs(Math.sin(P.runT*13))*0.09;
+    var idle=P.onGround&&spd<1&&P.punchT<=0;
+    u.torso.scale.y=1+(idle?Math.sin(t*2.2)*0.02:0);
+    if(idle) u.headG.rotation.y=Math.sin(t*0.5)*0.18;
+    else if(!P.fly) u.headG.rotation.y*=Math.max(0,1-6*dt);
+  }
+  // landing squash + takeoff stretch (skipped animation under reduced motion)
+  if(!RM){
+    var sq=P.squash>0?P.squash/0.18:0, st=P.stretch>0?P.stretch/0.15:0;
+    hero.scale.set(1+0.14*sq-0.06*st,1-0.2*sq+0.13*st,1+0.14*sq-0.06*st);
+  } else hero.scale.set(1,1,1);
+  // hurt flash: brief red suit tint (steady under reduced motion by design)
+  var fl=P.hurtF>0;
+  for(var mi=0;mi<u.flashMats.length;mi++) u.flashMats[mi].emissive.setHex(fl?0x7f1d1d:0x000000);
+
+  var swing=(P.onGround&&spd>1)?Math.sin(P.runT*13)*0.55:0;
+  if(P.fly){
+    // true flight pose in LOCAL space (group pitch lays it horizontal):
+    // lead arm continues the body line overhead (= forward once pitched),
+    // trail arm pinned back, legs straight together. Fist positions sit on
+    // the rod ends so nothing floats detached (see screenshot audit).
+    u.armR.rotation.x=0.13; u.armL.rotation.x=0.38;
+    u.fistR.position.set(0.72,2.42,0.08); u.fistL.position.set(-0.66,1.28,-0.2);
+    u.legL.rotation.x=0.08; u.legR.rotation.x=0.08;
+    u.legL.rotation.z=0.05; u.legR.rotation.z=-0.05;
+    // head looks where he's going (cancels most of the body pitch)
+    u.headG.rotation.x+=(((-1.0-0.15*P.boostR))-u.headG.rotation.x)*Math.min(1,5*dt);
+  } else {
+    u.headG.rotation.x+=(0-u.headG.rotation.x)*Math.min(1,8*dt);
+    u.legL.rotation.z=0; u.legR.rotation.z=0;
+    u.armL.rotation.x=swing; u.armR.rotation.x=-swing+(P.punchT>0?-1.5:0);
+    u.legL.rotation.x=-swing*0.9; u.legR.rotation.x=swing*0.9;
+    u.fistL.position.set(-0.72,1.2+Math.max(0,swing*0.2),0);
+    u.fistR.position.set(0.72+(P.punchT>0?0.35:0),1.2+(P.punchT>0?0.35:0),(P.punchT>0?0.9:0));
+  }
+  u.headG.position.y=2.55+Math.sin(t*2)*0.02;
+  var showEyes=firingNow;
+  u.eyes[0].visible=showEyes; u.eyes[1].visible=showEyes;
+  // cape: the rigid body pitch already streams it behind in flight;
+  // extra offsets are just wind flourish (small, so nothing curls weirdly)
+  var pos=u.cape.geometry.attributes.position, base=u.capeBase;
+  var amp=P.fly?(0.2+0.06*P.boostR):0.13, stream=P.fly?(-0.45-0.15*P.boostR):0;
+  var spd2=P.fly?(13+4*P.boostR):7;
+  for(var i=0;i<pos.count;i++){
+    var bx=base[i*3], by=base[i*3+1];
+    var hang=(0.95-by/1.9+0.5);
+    pos.setZ(i,Math.sin(t*spd2+by*3+bx*2)*amp*hang+stream*hang);
+  }
+  pos.needsUpdate=true;
+  hero.visible=RM?true:!(P.invuln>0&&Math.floor(t*14)%2===0&&state==='play');
+}
+
+/* ================= CAMERA ================= */
+var camPos=new THREE.Vector3(-6,10.5,0), camLook=new THREE.Vector3();
+var camYaw=Math.PI/2; // smoothed follow yaw: rests behind travel direction
+function updateCamera(dt){
+  // Third-person mouse look (UNDEFEATED/GTA-style): the cursor works like a
+  // joystick — offset from center turns/pitches the camera at a rate, so the
+  // hero and the view turn together and W always means "away". Rate (not
+  // position) control is what kills the old spiral/circling feedback loop:
+  // centered mouse holds a heading instead of chasing the hero's tail.
+  var touchMode=document.body.classList.contains('touch');
+  var canSteer=state==='play'&&!paused&&mouseSeen&&!orbiting&&!touchMode;
+  var sens={low:0.55,normal:1,high:1.6}[settings.sens]||1;
+  if(canSteer){
+    var sx=mouseNDC.x, sy=mouseNDC.y;
+    var dz=Math.abs(sx)>0.07?Math.sign(sx)*Math.pow(Math.abs(sx),1.4)*2.4*sens:0;
+    var dp=Math.abs(sy)>0.07?-Math.sign(sy)*Math.pow(Math.abs(sy),1.4)*1.5*sens:0;
+    camYaw-=dz*dt;
+    orbitPitch=Math.max(-0.5,Math.min(0.75,orbitPitch+dp*dt));
+  }
+  // gentle auto-align behind fast FORWARD motion only (strafing/backpedaling
+  // never swing the camera — that feedback loop ran players in circles).
+  // Gain stays below mouse-steer authority so manual aim always wins.
+  var hSpd0=Math.hypot(P.vel.x,P.vel.z);
+  var fwdInput=-lastMV.z; // +1 = full W
+  if(hSpd0>8&&fwdInput>0.3&&state==='play'&&settings.follow&&(!canSteer||Math.abs(mouseNDC.x)<0.15)){
+    var dyaw=P.facing-camYaw;
+    while(dyaw>Math.PI) dyaw-=Math.PI*2; while(dyaw<-Math.PI) dyaw+=Math.PI*2;
+    camYaw+=dyaw*Math.min(1,1.4*dt);
+    if(!orbiting) orbitYaw*=Math.max(0,1-1.4*dt);
+  }
+  // target lock frames the enemy: steer hard toward it
+  if(locked){
+    var ldx=locked.x-P.pos.x, ldz=locked.z-P.pos.z;
+    if(!locked.alive||ldx*ldx+ldz*ldz>3600) setLock(null);
+    else {
+      var lyaw=Math.atan2(ldx,ldz)-camYaw;
+      while(lyaw>Math.PI) lyaw-=Math.PI*2; while(lyaw<-Math.PI) lyaw+=Math.PI*2;
+      camYaw+=lyaw*Math.min(1,3.5*dt);
+    }
+  }
+  var yaw=camYaw+orbitYaw;
+  var fx=Math.sin(yaw), fz=Math.cos(yaw); // facing forward for this yaw
+  // dead-center chase: boom straight back, zero side offset, hero mid-screen
+  _want.set(
+    P.pos.x-fx*14,
+    Math.max(2.2,P.pos.y+7.5+orbitPitch*10),
+    P.pos.z-fz*14);
+  // fade any platform crowding the camera: closest-point-on-box distance,
+  // eased opacities, depth-write off while faded so the hero shows through
+  for(var fi=0;fi<solids.length;fi++){ var so=solids[fi];
+    if(so.noFade) continue;
+    var cx=Math.max(so.min.x,Math.min(camera.position.x,so.max.x));
+    var cy=Math.max(so.min.y,Math.min(camera.position.y,so.max.y));
+    var cz=Math.max(so.min.z,Math.min(camera.position.z,so.max.z));
+    var dx=camera.position.x-cx, dy=camera.position.y-cy, dz=camera.position.z-cz;
+    var dist=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    var target=dist<6?0.1:(dist<10?(dist-6)/4*0.9+0.1:1);
+    so.fade+=(target-so.fade)*Math.min(1,10*dt);
+    if(Math.abs(so.fade-target)<0.01) so.fade=target;
+    so.mesh.material.opacity=so.fade;
+    var solid=so.fade>0.6;
+    so.mesh.material.depthWrite=solid;
+    if(so.edge){ so.edge.material.opacity=so.fade; so.edge.material.depthWrite=solid; }
+  }
+  var k=1-Math.exp(-5*dt);
+  camPos.lerp(_want,k);
+  pushOutBld(camPos,1.4,camPos.y,camPos.y); // camera never sits inside a tower
+  // shake
+  var sh=(settings.shake&&!RM)?trauma*trauma*1.6:0;
+  camLook.set(P.pos.x+fx*4,P.pos.y+2.2,P.pos.z+fz*4);
+  camera.position.set(camPos.x+(Math.random()-0.5)*sh,camPos.y+(Math.random()-0.5)*sh,camPos.z+(Math.random()-0.5)*sh);
+  camera.lookAt(camLook);
+  // subtle FOV kick at flight speed sells the velocity without touching physics
+  var hSpd=Math.hypot(P.vel.x,P.vel.z);
+  var wantFov=60;
+  if(!RM){
+    if(P.fly&&hSpd>9) wantFov=68;
+    wantFov+=6*P.boostR; // spool-up stretches the view gradually
+    if(boomT>0.25) wantFov=80; // sonic-boom punch, then ease back
+  }
+  if(Math.abs(camera.fov-wantFov)>0.05){
+    camera.fov+=(wantFov-camera.fov)*Math.min(1,3*dt);
+    camera.updateProjectionMatrix();
+  }
+  sun.position.set(P.pos.x-40,70,P.pos.z+30);
+  sun.target.position.set(P.pos.x,0,P.pos.z); sun.target.updateMatrixWorld();
+}
+
+/* ================= HUD ================= */
+var hpFill=document.getElementById('hp-fill'), flFill=document.getElementById('fl-fill');
+var htFill=document.getElementById('ht-fill'), boFill=document.getElementById('bo-fill');
+var hpLabel=document.getElementById('hp-label'), flLabel=document.getElementById('fl-label');
+var htLabel=document.getElementById('ht-label'), boLabel=document.getElementById('bo-label');
+var scoreEl=document.getElementById('score'), metaEl=document.getElementById('meta');
+var progFill=document.getElementById('prog-fill');
+var hudTick=0;
+function updateHUD(){
+  if(++hudTick%3!==0) return;
+  var hp=Math.max(0,Math.min(100,P.hp)), fl=Math.max(0,Math.min(100,P.flight));
+  var ht=Math.max(0,Math.min(100,P.heat)), bo=Math.max(0,Math.min(100,P.hyper));
+  hpFill.style.width=hp+'%'; flFill.style.width=fl+'%';
+  htFill.style.width=ht+'%'; boFill.style.width=bo+'%';
+  document.getElementById('hp-meter').setAttribute('aria-valuenow',Math.round(hp));
+  document.getElementById('fl-meter').setAttribute('aria-valuenow',Math.round(fl));
+  document.getElementById('ht-meter').setAttribute('aria-valuenow',Math.round(ht));
+  document.getElementById('bo-meter').setAttribute('aria-valuenow',Math.round(bo));
+  hpLabel.textContent='❤ HEALTH '+Math.max(0,Math.ceil(P.hp))+(P.fly?'  ✈ FLYING':'')+(P.boost?'  ⚡HYPER':'');
+  flLabel.textContent='✈ FLIGHT '+Math.floor(P.flight);
+  htLabel.textContent='👁 HEAT '+Math.floor(P.heat);
+  boLabel.textContent='⚡ HYPER '+Math.floor(P.hyper);
+  scoreEl.textContent='SCORE '+score;
+  metaEl.textContent='👪 '+rescued+'/5  💛×'+lives+'  ⏱ '+Math.floor(gameTime)+'s';
+  progFill.style.width=(Math.max(0,Math.min(1,P.pos.x/214))*100)+'%';
+  // objectives panel: the critical path at a glance
+  var open=rescued>=5&&bossDown;
+  elCiv.textContent='👪 Citizens '+rescued+'/5';
+  elCiv.className='obj'+(rescued>=5?' done':'');
+  elBoss.textContent=bossDown?'🤖 Mech: DOWN':'🤖 Mech: ACTIVE';
+  elBoss.className='obj'+(bossDown?' done':'');
+  elBeacon.textContent=open?'🗼 Beacon: OPEN':'🗼 Beacon: LOCKED';
+  elBeacon.className='obj'+(open?' open':'');
+}
+
+/* ================= LOOP ================= */
+var last=performance.now(), acc=0, animT=0;
+crossEl=document.getElementById('cross');
+// adaptive quality: auto mode steps pixel-ratio down (then shadows off) when
+// the frame EMA stays slow; High/Low pins it. Persisted via settings.
+var qLevel=0, frameEMA=1/60, qFrames=0;
+function applyQuality(resetAuto){
+  if(settings.quality==='low') qLevel=3;
+  else if(settings.quality==='high') qLevel=0;
+  else if(resetAuto) qLevel=0;
+  var dprs=[Math.min(window.devicePixelRatio||1,2),1.5,1.25,1];
+  renderer.setPixelRatio(dprs[Math.min(3,qLevel)]);
+  sun.castShadow=qLevel<3;
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  var delta=(now-last)/1000; last=now;
+  if(!(delta>0)) delta=STEP;
+  if(delta>0.1) delta=0.1;
+  // quality monitor (auto only): 4s windows, one step per window max
+  frameEMA+=(delta-frameEMA)*0.04;
+  if(settings.quality==='auto'&&++qFrames>=240){
+    qFrames=0;
+    if(frameEMA>0.026&&qLevel<3){ qLevel++; applyQuality(false); }
+  }
+  if(endLock>0) endLock-=delta;
+  if(bannerTimer>0){ bannerTimer-=delta; if(bannerTimer<=0&&bannerEl) bannerEl.className=''; }
+  animT+=delta;
+  if(state==='play'&&!paused){
+    acc+=delta; var n=0;
+    while(acc>=STEP&&n<4){ update(STEP); acc-=STEP; n++; }
+    if(n===4) acc=0;
+  } else if(state==='menu'){ updateMenu(delta); }
+  // physics sanity net: never let a NaN disappear the hero
+  if(!isFinite(P.pos.x+P.pos.y+P.pos.z+P.vel.x+P.vel.y+P.vel.z)){
+    P.pos.set(checkpoint.x,checkpoint.y,checkpoint.z); P.vel.set(0,0,0);
+  }
+  // blinkers share two materials; toggling assignment is allocation-free
+  for(var i=0;i<blinkers.length;i++) blinkers[i].material=(RM||Math.sin(animT*4+blinkers[i].userData.phase)>0.4)?MATblinkOn:MATblinkOff;
+  animateHero(delta,animT);
+  updateCamera(delta);
+  updateHUD();
+  updateFloaters(delta);
+  // compass: nearest unrescued citizen, floating above the hero
+  var nearC=null, nd=1e18, ci;
+  if(state==='play'){
+    for(ci=0;ci<civilians.length;ci++){ var cc=civilians[ci];
+      if(cc.rescued) continue;
+      var ax=cc.mesh.position.x-P.pos.x, az=cc.mesh.position.z-P.pos.z, dd=ax*ax+az*az;
+      if(dd<nd){ nd=dd; nearC=cc; }
+    }
+  }
+  if(nearC){
+    compassG.visible=true;
+    compassG.position.set(P.pos.x,P.pos.y+3.9+Math.sin(animT*3)*0.15,P.pos.z);
+    compassG.rotation.y=Math.atan2(nearC.mesh.position.x-P.pos.x,nearC.mesh.position.z-P.pos.z);
+  } else compassG.visible=false;
+  // custom cursor: follows the real mouse — or pins to the lock target
+  if(locked&&(!locked.alive||state!=='play')) setLock(null);
+  if(locked&&locked.alive&&state==='play'&&!paused){
+    lockMarker.visible=true;
+    lockMarker.position.set(locked.x,locked.y+2.6+Math.sin(animT*5)*0.15,locked.z);
+    lockMarker.rotation.y+=6*delta;
+    _pv.set(locked.x,locked.y+1.2,locked.z).project(camera);
+    if(_pv.z<1&&crossEl){
+      crossEl.style.display='block';
+      crossEl.style.left=((_pv.x*0.5+0.5)*window.innerWidth)+'px';
+      crossEl.style.top=((-_pv.y*0.5+0.5)*window.innerHeight)+'px';
+    } else if(crossEl) crossEl.style.display='none';
+  } else {
+    if(lockMarker) lockMarker.visible=false;
+    if(crossEl){
+      if(state==='play'&&!paused&&mouseSeen){
+        crossEl.style.display='block';
+        crossEl.style.left=mousePX.x+'px';
+        crossEl.style.top=mousePX.y+'px';
+      } else crossEl.style.display='none';
+    }
+  }
+  renderer.render(scene,camera);
+}
+
+/* Test/assist hooks (read-mostly; used by automated acceptance runs). */
+window.__game={
+  snapshot:function(){ return {state:state, paused:paused, hp:Math.round(P.hp),
+    flight:Math.round(P.flight), heat:Math.round(P.heat), hyper:Math.round(P.hyper),
+    fly:!!P.fly, muted:muted, god:!!settings.god,
+    x:+P.pos.x.toFixed(1), y:+P.pos.y.toFixed(1), z:+P.pos.z.toFixed(1),
+    rescued:rescued, bossAlive:bossAlive(), bossHp:(function(){var b=bossObj();return b?Math.max(0,Math.ceil(b.hp)):0;})(),
+    bossIntro:bossIntro, lives:lives, deaths:deaths, score:score,
+    open:(rescued>=5&&!bossAlive()), qLevel:qLevel,
+    foes:(function(){var n=0;for(var i=0;i<enemies.length;i++)if(enemies[i].alive)n++;return n;})(),
+    pt:+P.punchT.toFixed(2), pcd:+P.punchCD.toFixed(2),
+    foe:(function(){var m=1e9;for(var i=0;i<enemies.length;i++){var e=enemies[i];if(!e.alive)continue;
+      var dx=e.x-P.pos.x,dz=e.z-P.pos.z,d=Math.sqrt(dx*dx+dz*dz);if(d<m)m=d;}return +m.toFixed(1);})(),
+    beam:{end:+lastBeamT.toFixed(1), hit:lastBeamHit},
+    lock:!!(locked&&locked.alive), boostR:+P.boostR.toFixed(2), boom:boomCount,
+    carry:!!carrying, yaw:+camYaw.toFixed(2) }; },
+  mem:function(){ return {nodes:countNodes(scene), geo:renderer.info.memory.geometries,
+    tex:renderer.info.memory.textures, parts:activeParts(), bullets:activeBullets(),
+    calls:renderer.info.render.calls}; },
+  restart:function(){ startGame(); },
+  warp:function(x,y,z){ P.pos.set(x,y==null?3:y,z==null?P.pos.z:z); P.vel.set(0,0,0); },
+  setHp:function(n){ P.hp=n; },
+  setLives:function(n){ lives=n; },
+  hurt:function(n){ P.invuln=0; hurtPlayer(n,P.pos.x+1); },
+  killBoss:function(){ var b=bossObj(); if(b) damageEnemy(b,99999); },
+  rescueAll:function(){ for(var i=0;i<civilians.length;i++){ var c=civilians[i];
+    if(!c.rescued){ c.rescued=true; c.mark.visible=false; c.beacon.visible=false; c.body.material=MAT.civSaved; rescued++; } } },
+  give:function(o){ for(var k in o){ P[k]=o[k]; } },
+  foePos:function(){ var m=1e18, out=null;
+    for(var i=0;i<enemies.length;i++){ var e=enemies[i]; if(!e.alive||e.type==='boss') continue;
+      var dx=e.x-P.pos.x, dz=e.z-P.pos.z, d=dx*dx+dz*dz;
+      if(d<m){ m=d; out={x:+e.x.toFixed(1), z:+e.z.toFixed(1), hp:Math.ceil(e.hp), type:e.type}; } }
+    return out; },
+  dbg:{scene:scene, camera:camera, renderer:renderer}
+};
+function countNodes(o){ var n=1; for(var i=0;i<o.children.length;i++) n+=countNodes(o.children[i]); return n; }
+
+applyQuality(true);
+refreshMenuBest();
+buildLevel(); resetPlayer();
+P.pos.set(8,3,0);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
