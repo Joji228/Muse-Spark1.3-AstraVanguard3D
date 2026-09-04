@@ -14,15 +14,13 @@
 [![No build step](https://img.shields.io/badge/build-none-4ade80)]()
 [![Play online](https://img.shields.io/badge/play-GitHub%20Pages-ffd700)]()
 
-## 🎮 <a href="https://joji228.github.io/Muse-Spark1.3-AstraVanguard3D/" target="_blank" rel="noopener">▶️ Play it right now in your browser</a>
+## 🎮 [▶️ Play it right now in your browser](https://joji228.github.io/Muse-Spark1.3-AstraVanguard3D/)
 
 </div>
 
 ---
 
-## ▶️ Run it
-
-**Easiest:** just open the hosted build — <a href="https://joji228.github.io/Muse-Spark1.3-AstraVanguard3D/" target="_blank" rel="noopener">joji228.github.io/Muse-Spark1.3-AstraVanguard3D</a> — no install, no build, no server.
+## [▶️ Run it](https://joji228.github.io/Muse-Spark1.3-AstraVanguard3D/)
 
 **Locally:** double-click `index.html` (or serve the folder statically). Internet is needed once for the Three.js CDN.
 
