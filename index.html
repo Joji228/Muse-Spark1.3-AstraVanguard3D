@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunwarden: Solaris Rescue 3D — Superhero Platformer</title>
+<title>Sunwarden: Solaris Rescue 3D v0.2.0 — Superhero Platformer</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; overflow:hidden; background:#020617; font-family:'Segoe UI',system-ui,Arial,sans-serif; }
@@ -199,7 +199,7 @@
   <div id="floaters"></div>
   <div id="hint"><b>Left-click (hold)</b> heat vision &nbsp;•&nbsp; <b>Mouse</b> steers camera &nbsp;•&nbsp; <b>Wheel-click</b> lock target &nbsp;•&nbsp; <b>WASD</b> move &nbsp;•&nbsp; <b>Space</b> hold to <b>FLY</b> (<b>C</b> dives) &nbsp;•&nbsp; <b>Q</b> grab rubble, <b>J</b>/click to throw &nbsp;•&nbsp; <b>Shift</b> ⚡ hyperspeed &nbsp;•&nbsp; <b>P</b> menu</div>
   <div id="god-badge">⭐ GOD MODE ⭐</div>
-  <div id="title-tag">☀ SUNWARDEN: SOLARIS RESCUE 3D</div>
+  <div id="title-tag">☀ SUNWARDEN: SOLARIS RESCUE 3D <span style="opacity:.65">v0.2.0</span></div>
   <div id="touch">
     <div class="tgroup" id="tMove">
       <button type="button" class="tbtn" id="tF" aria-label="Move forward">▲</button><button type="button" class="tbtn" id="tL" aria-label="Move left">◀</button><button type="button" class="tbtn" id="tB" aria-label="Move back">▼</button><button type="button" class="tbtn" id="tR" aria-label="Move right">▶</button>
@@ -325,6 +325,7 @@ var orbitYaw=0, orbitPitch=0; // user orbit offsets
 var touch={f:false,b:false,l:false,r:false,j:false,p:false,e:false,h:false,d:false};
 var punchQueued=false, punchPrev=false;
 var lastMV={x:0,z:0}; // latest move input, shared with the camera system
+var MV={x:0,z:0}; // moveInput scratch: reused every step, never allocated
 var crossEl=null; // cached in boot below
 
 /* ================= SETTINGS + PAUSE MENU ================= */
@@ -413,7 +414,7 @@ renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.0;
 
 var scene=new THREE.Scene();
-scene.background=skyTex;
+scene.background=new THREE.Color(0x87b5e8); // replaced by the sky gradient once built below
 scene.fog=new THREE.Fog(0xc3d9f2,80,380);
 
 var camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,1200);
@@ -501,6 +502,7 @@ var skyTex=canvasTex(4,512,function(g,w,h){
   gr.addColorStop(0.68,'#8fbde9'); gr.addColorStop(0.85,'#d7e9f7'); gr.addColorStop(1,'#f6e8c8');
   g.fillStyle=gr; g.fillRect(0,0,w,h);
 });
+scene.background=skyTex; // assign AFTER creation so the gradient truly renders
 
 /* ================= WORLD ================= */
 // a few static-decor geometries live here because this section runs before
@@ -691,6 +693,7 @@ var MATPART={};
 function partMatFor(c){ return MATPART[c]||MATPART.white; }
 // module-scope temps: the hot loop must not allocate
 var UPV=new THREE.Vector3(0,1,0);
+var ZERONDC={x:0,y:0}; // fallback aim: shared const, never allocated per step
 var _muzzle=new THREE.Vector3(), _v1=new THREE.Vector3(), _want=new THREE.Vector3(), _bdir=new THREE.Vector3();
 
 /* ---- pooled particles: 260 preallocated records, zero per-spawn allocation ---- */
@@ -740,6 +743,28 @@ function fireBullet(x,y,z,vx,vy,vz){
 }
 function clearBullets(){ for(var i=0;i<BPOOL.length;i++){ BPOOL[i].active=false; BPOOL[i].mesh.visible=false; } }
 function activeBullets(){ var n=0; for(var i=0;i<BPOOL.length;i++) if(BPOOL[i].active) n++; return n; }
+/* ---- boss anti-air orbs: slow homing volleys, dodgeable, laser-poppable ---- */
+var OPOOL=[];
+(function(){
+  var og=new THREE.SphereGeometry(0.34,10,8);
+  var om=new THREE.MeshBasicMaterial({color:0xc026d3});
+  for(var i=0;i<12;i++){
+    var m=new THREE.Mesh(og,om); m.visible=false; scene.add(m);
+    OPOOL.push({mesh:m, vx:0,vy:0,vz:0, life:0, hp:0, active:false});
+  }
+})();
+var bossAtkCount=0, orbCount=0; // test telemetry: telegraphs started, orbs fired
+function fireOrb(x,y,z,dx,dy,dz){
+  for(var i=0;i<OPOOL.length;i++){ var o=OPOOL[i];
+    if(o.active) continue;
+    o.active=true; o.hp=8; o.life=4.5;
+    o.vx=dx*11; o.vy=dy*11; o.vz=dz*11;
+    o.mesh.position.set(x,y,z); o.mesh.visible=true;
+    orbCount++; return;
+  }
+}
+function clearOrbs(){ for(var i=0;i<OPOOL.length;i++){ OPOOL[i].active=false; OPOOL[i].mesh.visible=false; } }
+function activeOrbs(){ var n=0; for(var i=0;i<OPOOL.length;i++) if(OPOOL[i].active) n++; return n; }
 // sonic-boom shockwave ring (own opacity-animated material, one user only)
 var boomRingMat=new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide});
 var boomRing=new THREE.Mesh(GEO.ring,boomRingMat);
@@ -747,6 +772,12 @@ boomRing.visible=false; scene.add(boomRing);
 // lock-on marker: spinning diamond over the locked foe (persistent, one mesh)
 var lockMarker=new THREE.Mesh(GEO.octa,MAT.markRed);
 lockMarker.scale.set(0.45,0.7,0.45); lockMarker.visible=false; scene.add(lockMarker);
+// boss dormancy shield: one persistent bubble, parked on the Mech until the
+// arena wakes it. Communicates "not yet" instead of silently eating damage.
+var bossShieldMat=new THREE.MeshBasicMaterial({color:0xb794ff, transparent:true, opacity:0.22, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide});
+var bossShield=new THREE.Mesh(GEO.ball,bossShieldMat);
+bossShield.scale.set(3.6,3.6,3.6); bossShield.visible=false; scene.add(bossShield);
+var shieldMsgT=0;
 // compass arrow: points at the nearest unrescued citizen (yaw-only billboard)
 var compassG=new THREE.Group(), compassCone;
 (function(){
@@ -902,30 +933,22 @@ var lastBeamT=-1, lastBeamHit=false; // test telemetry: where the beam stopped
 var UP_Y=new THREE.Vector3(0,1,0);
 function setBeam(a,b,alpha){
   beamAlpha=alpha;
-  [beamOuter,beamInner].forEach(function(m){ m.visible=alpha>0.02; });
-  if(alpha<=0.02) return;
+  var vis=alpha>0.02;
+  beamOuter.visible=vis; beamInner.visible=vis;
+  if(!vis) return;
   var dir=_bdir.subVectors(b,a);
   var len=dir.length();
   if(len<0.001) return;
   dir.normalize();
-  [beamOuter,beamInner].forEach(function(m){
-    m.position.copy(a).addScaledVector(dir,len/2);
-    m.quaternion.setFromUnitVectors(UP_Y,dir);
-    m.scale.set(1,len,1);
-  });
+  beamOuter.position.copy(a).addScaledVector(dir,len/2);
+  beamOuter.quaternion.setFromUnitVectors(UP_Y,dir);
+  beamOuter.scale.set(1,len,1);
+  beamInner.position.copy(a).addScaledVector(dir,len/2);
+  beamInner.quaternion.setFromUnitVectors(UP_Y,dir);
+  beamInner.scale.set(1,len,1);
   beamOuter.material.opacity=0.5*alpha; beamInner.material.opacity=0.95*alpha;
 }
-// slab-method ray vs AABB: returns entry t, or -1 on miss. Used so heat
-// vision stops at the first wall instead of passing through the world.
-var _rb={t:0};
-function rayBoxT(ox,oy,oz,dx,dy,dz,mn,mx){
-  var t0=0, t1=1e9, inv, a, b, t;
-  inv=1/(dx||1e-9); a=(mn.x-ox)*inv; b=(mx.x-ox)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
-  inv=1/(dy||1e-9); a=(mn.y-oy)*inv; b=(mx.y-oy)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
-  inv=1/(dz||1e-9); a=(mn.z-oz)*inv; b=(mx.z-oz)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
-  if(t0>t1||t1<0) return -1;
-  t=t0<0?0:t0; _rb.t=t; return t;
-}
+// (ray-vs-AABB lives with the collider store + spatial grid below)
 
 /* ---- pickups / civilians / enemies ---- */
 var crystals=[], civilians=[], enemies=[];
@@ -989,9 +1012,10 @@ function buildLevel(){
   solids.length=0;
   for(var ci=0;ci<citySolids.length;ci++) solids.push(citySolids[ci]);
   crystals.length=0; civilians.length=0; enemies.length=0; checkpoints.length=0;
-  clearParts(); clearBullets();
+  clearParts(); clearBullets(); clearOrbs();
   slamMode='hide'; slamT=0;
   buildPlatforms();
+  rebuildGrid(); // colliders (platforms + city) are final for this run
 
   var cx=[10,20,30,46,60,72,82,96,108,122,150,164,30,100];
   var cyy=[5.2,7.8,5.2,7.3,5.2,7.3,5.2,6.8,5.2,6.8,6.8,5.2,12.6,12.1];
@@ -1045,7 +1069,8 @@ function buildLevel(){
       type:brute?'brute':'walker', x:x, y:0, z:z, vx:0, vy:0, vz:0,
       w:1.2*s, h:1.9*s, hp:brute?60:34, maxhp:brute?60:34, alive:true, dying:0,
       base:(Math.random()>0.5?2.2:-2.2), t:Math.random()*5, score:brute?250:100,
-      spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1*s};
+      spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1*s,
+      mode:'patrol', stT:0, thinkT:Math.random()*0.12};
   }
   function drone(x,y,z,hp){
     var g=new THREE.Group();
@@ -1056,7 +1081,7 @@ function buildLevel(){
     var bar=new THREE.Mesh(GEO.rotor,MAT.rotor);
     bar.position.y=0.75; g.add(bar);
     g.position.set(x,y,z); levelGroup.add(g);
-    return {mesh:g, core:core, rotor:bar, type:'drone', x:x, y:y, z:z, vx:0,
+    return {mesh:g, core:core, rotor:bar, type:'drone', x:x, y:y, z:z, vx:0, vy:0, vz:0,
       hp:hp, maxhp:hp, alive:true, t:Math.random()*5, baseY:y, baseX:x, baseZ:z, score:150,
       range:9, shootT:1+Math.random(), spawnX:x, spawnZ:z, ph:Math.random()*6, flash:0, r:1.1,
       px:0, pz:0};
@@ -1088,8 +1113,9 @@ function buildLevel(){
     spike.scale.set(0.6,0.75,0.6); spike.position.set(-0.9+s*0.6,3.9,0); bossG.add(spike); }
   bossG.position.set(200,0,0); levelGroup.add(bossG);
   enemies.push({mesh:bossG, eye:beye, type:'boss', x:200, y:0, z:0, vx:0, vy:0, vz:0, w:2.4, h:4.2,
-    hp:150, maxhp:150, alive:true, base:2.0, t:0, score:1000, spawnX:200, spawnZ:0, flash:0, r:2.2,
-    atkCD:2.5, tele:0, enraged:false});
+    hp:150, maxhp:150, alive:true, dormant:true, base:2.0, t:0, score:1000, spawnX:200, spawnZ:0, flash:0, r:2.2,
+    atkCD:2.5, tele:0, enraged:false, orbCD:2.5, chargeCD:4,
+    chargeT:0, charging:0, chargeDx:0, chargeDz:0, chargeSpd:24, orbTele:0});
 
   // Beacon Tower finish (rebranded from Daily Planet): ring glows red while
   // locked, green once citizens are safe and the Mech is down.
@@ -1158,7 +1184,7 @@ function startGame(){
   if(boomRing) boomRing.visible=false;
   if(bossBarEl) bossBarEl.style.display='none';
   setBeam(new THREE.Vector3(),new THREE.Vector3(),0);
-  orbitYaw=0; orbitPitch=0; camYaw=Math.PI/2; mouseDown=false; prevMouseDown=false; punchQueued=false;
+  orbitYaw=0; orbitPitch=0; camYaw=Math.PI/2; camDist=14; mouseDown=false; prevMouseDown=false; punchQueued=false;
   state='play'; paused=false;
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('end').classList.add('hidden');
@@ -1331,12 +1357,12 @@ function markTouch(){
 try{ if(window.matchMedia&&matchMedia('(pointer:coarse)').matches) markTouch(); }catch(e){}
 
 function moveInput(){
-  var x=0,z=0;
-  if(keys.KeyW||keys.ArrowUp||touch.f) z-=1;
-  if(keys.KeyS||keys.ArrowDown||touch.b) z+=1;
-  if(keys.KeyA||keys.ArrowLeft||touch.l) x-=1;
-  if(keys.KeyD||keys.ArrowRight||touch.r) x+=1;
-  return {x:x,z:z};
+  MV.x=0; MV.z=0;
+  if(keys.KeyW||keys.ArrowUp||touch.f) MV.z-=1;
+  if(keys.KeyS||keys.ArrowDown||touch.b) MV.z+=1;
+  if(keys.KeyA||keys.ArrowLeft||touch.l) MV.x-=1;
+  if(keys.KeyD||keys.ArrowRight||touch.r) MV.x+=1;
+  return MV;
 }
 function jumpHeld(){ return !!(keys.Space||touch.j); }
 function laserHeld(){ return mouseDown||keys.KeyK||touch.e; } // NOTE: KeyC is dive-only, never laser
@@ -1365,11 +1391,77 @@ function toggleLock(){
   if(best){ setLock(best); addFloater(best.x,best.y+2.6,best.z,'LOCKED','#ffd700'); }
 }
 
+/* ================= COLLIDERS + SPATIAL GRID =================
+   solids[] entries are plain data ({min,max} Vector3s + flags) — no meshes
+   needed. A uniform XZ grid + per-query stamps keeps every lookup (player,
+   enemies, bullets, laser, camera, AI) to a handful of AABB tests. */
+var GRID_CELL=8, gridCells={}, gridStamp=0;
+var _qarr=[]; // scratch candidate list (reused, never exposed)
+function gridKey(cx,cz){ return (cx+64)*512+(cz+64); }
+function rebuildGrid(){
+  gridCells={};
+  for(var i=0;i<solids.length;i++){ var s=solids[i];
+    var x0=Math.floor(s.min.x/GRID_CELL), x1=Math.floor(s.max.x/GRID_CELL);
+    var z0=Math.floor(s.min.z/GRID_CELL), z1=Math.floor(s.max.z/GRID_CELL);
+    for(var cx=x0;cx<=x1;cx++) for(var cz=z0;cz<=z1;cz++){
+      var k=gridKey(cx,cz), a=gridCells[k];
+      if(!a){ a=[]; gridCells[k]=a; }
+      a.push(i);
+    }
+  }
+}
+// gather unique solids overlapping an XZ rect into _qarr; returns count
+function querySolids(x0,z0,x1,z1){
+  _qarr.length=0; gridStamp++;
+  var cx0=Math.floor(Math.min(x0,x1)/GRID_CELL), cx1=Math.floor(Math.max(x0,x1)/GRID_CELL);
+  var cz0=Math.floor(Math.min(z0,z1)/GRID_CELL), cz1=Math.floor(Math.max(z0,z1)/GRID_CELL);
+  for(var cx=cx0;cx<=cx1;cx++) for(var cz=cz0;cz<=cz1;cz++){
+    var a=gridCells[gridKey(cx,cz)];
+    if(!a) continue;
+    for(var i=0;i<a.length;i++){ var s=solids[a[i]];
+      if(s._gs!==gridStamp){ s._gs=gridStamp; _qarr.push(s); }
+    }
+  }
+  return _qarr.length;
+}
+// ray vs solids along a segment bbox; returns nearest entry t or -1.
+// ignoreUnder: skip solids whose top sits at/below this height (e.g. the
+// floor the shooter stands on) so attacks don't self-block.
+var _rb={t:0};
+function rayBoxT(ox,oy,oz,dx,dy,dz,mn,mx){
+  var t0=0, t1=1e9, inv, a, b, t;
+  inv=1/(dx||1e-9); a=(mn.x-ox)*inv; b=(mx.x-ox)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  inv=1/(dy||1e-9); a=(mn.y-oy)*inv; b=(mx.y-oy)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  inv=1/(dz||1e-9); a=(mn.z-oz)*inv; b=(mx.z-oz)*inv; t0=Math.max(t0,Math.min(a,b)); t1=Math.min(t1,Math.max(a,b));
+  if(t0>t1||t1<0) return -1;
+  t=t0<0?0:t0; _rb.t=t; return t;
+}
+function rayWorld(ox,oy,oz,dx,dy,dz,maxT,ignoreUnder){
+  var ex=ox+dx*maxT, ez=oz+dz*maxT;
+  querySolids(Math.min(ox,ex)-1,Math.min(oz,ez)-1,Math.max(ox,ex)+1,Math.max(oz,ez)+1);
+  var best=-1, bt=maxT;
+  for(var i=0;i<_qarr.length;i++){ var s=_qarr[i];
+    if(ignoreUnder!==undefined&&s.max.y<=ignoreUnder) continue;
+    var t=rayBoxT(ox,oy,oz,dx,dy,dz,s.min,s.max);
+    if(t>=0&&t<bt){ bt=t; best=t; }
+  }
+  return best;
+}
+// point (with radius pad) inside any solid? for bullets/rubble/dash checks
+function pointInSolids(x,y,z,pad,bldOnly){
+  querySolids(x-pad,z-pad,x+pad,z+pad);
+  for(var i=0;i<_qarr.length;i++){ var s=_qarr[i];
+    if(bldOnly&&!s.bld) continue;
+    if(x>s.min.x-pad&&x<s.max.x+pad&&y>s.min.y-pad&&y<s.max.y+pad&&z>s.min.z-pad&&z<s.max.z+pad) return s;
+  }
+  return null;
+}
 /* Push ground entities (and the camera) out of building footprints — but only
    when vertically overlapping, so rooftop landings still work. y0/y1 is the
    vertical span to test (point query when equal). */
 function pushOutBld(e,r,y0,y1){
-  for(var i=0;i<solids.length;i++){ var s=solids[i];
+  querySolids(e.x-r,e.z-r,e.x+r,e.z+r);
+  for(var i=0;i<_qarr.length;i++){ var s=_qarr[i];
     if(!s.bld) continue;
     if(y1<s.min.y||y0>s.max.y) continue;
     var nx=Math.max(s.min.x,Math.min(e.x,s.max.x));
@@ -1383,45 +1475,63 @@ function pushOutBld(e,r,y0,y1){
 }
 
 /* ================= COLLISION (AABB) ================= */
-var tmpMin=new THREE.Vector3(), tmpMax=new THREE.Vector3();
-function playerAABB(){
-  tmpMin.set(P.pos.x-P.w/2, P.pos.y, P.pos.z-P.w/2);
-  tmpMax.set(P.pos.x+P.w/2, P.pos.y+P.h, P.pos.z+P.w/2);
-  return {min:tmpMin,max:tmpMax};
-}
+/* Swept character controller: each axis moves in substeps no longer than
+   0.55u (player half-width 0.45), so hyperspeed can never tunnel through
+   towers. Axis separation preserves wall sliding; normal speeds cost exactly
+   one substep, so there is no extra work in the common case. */
+var EPS=0.001, MAXSUB=6, SUBLEN=0.55;
+function overlapYZ(s,py0,py1,pz0,pz1){ return py0<s.max.y&&py1>s.min.y&&pz0<s.max.z&&pz1>s.min.z; }
+function overlapXZ(s,px0,px1,pz0,pz1){ return px0<s.max.x&&px1>s.min.x&&pz0<s.max.z&&pz1>s.min.z; }
 function collide(dt){
-  // integrate X
-  P.pos.x+=P.vel.x*dt;
-  var pb=playerAABB(), i, s;
-  for(i=0;i<solids.length;i++){ s=solids[i];
-    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
-      if(P.vel.x>0) P.pos.x=s.min.x-P.w/2-0.001;
-      else if(P.vel.x<0) P.pos.x=s.max.x+P.w/2+0.001;
-      P.vel.x=0; pb=playerAABB();
+  var hw=P.w/2, i, s, k, n;
+  var wasGround=P.onGround, fallV=P.vel.y, sub;
+  // ---- X (untouched Z keeps wall slides gliding along facades) ----
+  var dx=P.vel.x*dt;
+  n=Math.min(MAXSUB,Math.max(1,Math.ceil(Math.abs(dx)/SUBLEN)));
+  for(k=0;k<n;k++){
+    P.pos.x+=dx/n;
+    querySolids(P.pos.x-hw-0.05,P.pos.z-hw-0.05,P.pos.x+hw+0.05,P.pos.z+hw+0.05);
+    for(i=0;i<_qarr.length;i++){ s=_qarr[i];
+      if(!overlapYZ(s,P.pos.y,P.pos.y+P.h,P.pos.z-hw,P.pos.z+hw)) continue;
+      if(dx>0&&P.pos.x+hw>s.min.x&&P.pos.x-hw<s.min.x){ P.pos.x=s.min.x-hw-EPS; P.vel.x=0; }
+      else if(dx<0&&P.pos.x-hw<s.max.x&&P.pos.x+hw>s.max.x){ P.pos.x=s.max.x+hw+EPS; P.vel.x=0; }
     }
   }
-  // integrate Z (city bounds: three avenues + blocks, z in [-66,66])
-  P.pos.z+=P.vel.z*dt;
-  P.pos.z=Math.max(-66,Math.min(66,P.pos.z));
-  pb=playerAABB();
-  for(i=0;i<solids.length;i++){ s=solids[i];
-    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
-      if(P.vel.z>0) P.pos.z=s.min.z-P.w/2-0.001;
-      else if(P.vel.z<0) P.pos.z=s.max.z+P.w/2+0.001;
-      P.vel.z=0; pb=playerAABB();
+  // ---- Z (city avenues run z in [-66,66]) ----
+  var dz=P.vel.z*dt;
+  n=Math.min(MAXSUB,Math.max(1,Math.ceil(Math.abs(dz)/SUBLEN)));
+  for(k=0;k<n;k++){
+    P.pos.z+=dz/n;
+    P.pos.z=Math.max(-66,Math.min(66,P.pos.z));
+    querySolids(P.pos.x-hw-0.05,P.pos.z-hw-0.05,P.pos.x+hw+0.05,P.pos.z+hw+0.05);
+    for(i=0;i<_qarr.length;i++){ s=_qarr[i];
+      if(!overlapYZ(s,P.pos.y,P.pos.y+P.h,P.pos.x-hw,P.pos.x+hw)) continue;
+      if(dz>0&&P.pos.z+hw>s.min.z&&P.pos.z-hw<s.min.z){ P.pos.z=s.min.z-hw-EPS; P.vel.z=0; }
+      else if(dz<0&&P.pos.z-hw<s.max.z&&P.pos.z+hw>s.max.z){ P.pos.z=s.max.z+hw+EPS; P.vel.z=0; }
     }
   }
-  // integrate Y
-  var wasGround=P.onGround, fallV=P.vel.y;
-  P.pos.y+=P.vel.y*dt;
+  // ---- Y: land on the highest top crossed, bonk the lowest ceiling ----
+  var dy=P.vel.y*dt;
+  n=Math.min(MAXSUB,Math.max(1,Math.ceil(Math.abs(dy)/SUBLEN)));
   P.onGround=false;
-  pb=playerAABB();
-  for(i=0;i<solids.length;i++){ s=solids[i];
-    if(pb.min.x<s.max.x&&pb.max.x>s.min.x&&pb.min.y<s.max.y&&pb.max.y>s.min.y&&pb.min.z<s.max.z&&pb.max.z>s.min.z){
-      if(P.vel.y<=0 && P.pos.y>=s.max.y-1.2){ P.pos.y=s.max.y+0.001; P.vel.y=0; P.onGround=true; }
-      else if(P.vel.y>0){ P.pos.y=s.min.y-P.h-0.001; P.vel.y=0; }
-      pb=playerAABB();
+  for(k=0;k<n;k++){
+    P.pos.y+=dy/n;
+    querySolids(P.pos.x-hw-0.05,P.pos.z-hw-0.05,P.pos.x+hw+0.05,P.pos.z+hw+0.05);
+    for(i=0;i<_qarr.length;i++){ s=_qarr[i];
+      if(!overlapXZ(s,P.pos.x-hw,P.pos.x+hw,P.pos.z-hw,P.pos.z+hw)) continue;
+      if(dy<=0&&P.pos.y<=s.max.y&&P.pos.y>s.max.y-1.4){ P.pos.y=s.max.y+EPS; P.vel.y=0; P.onGround=true; }
+      else if(dy>0&&P.pos.y+P.h>=s.min.y&&P.pos.y+P.h<s.min.y+1.4){ P.pos.y=s.min.y-P.h-EPS; P.vel.y=0; }
     }
+  }
+  // ---- ground snapping: stick over lips and steps instead of jittering ----
+  if(!P.onGround&&P.vel.y<=0.1&&wasGround){
+    querySolids(P.pos.x-hw,P.pos.z-hw,P.pos.x+hw,P.pos.z+hw);
+    var bestY=-1e9;
+    for(i=0;i<_qarr.length;i++){ s=_qarr[i];
+      if(!overlapXZ(s,P.pos.x-hw,P.pos.x+hw,P.pos.z-hw,P.pos.z+hw)) continue;
+      if(s.max.y<=P.pos.y+0.05&&s.max.y>P.pos.y-0.7&&s.max.y>bestY) bestY=s.max.y;
+    }
+    if(bestY>-1e8){ P.pos.y=bestY+EPS; P.vel.y=0; P.onGround=true; }
   }
   if(P.onGround){ P.coyote=0.12;
     if(!wasGround&&fallV<-22){ spawnParts(P.pos.x,P.pos.y+0.2,P.pos.z,8,0xe2e8f0,7,0.45); P.squash=0.18; }
@@ -1437,18 +1547,33 @@ var raycaster=new THREE.Raycaster();
 var camFwd=new THREE.Vector3(), eyePos=new THREE.Vector3(), aimDir=new THREE.Vector3(), farPt=new THREE.Vector3();
 var fwd2=new THREE.Vector3(), right2=new THREE.Vector3();
 
-function hurtPlayer(dmg,fromX){
+/* Directional damage feedback: knockback always points away from the source
+   in 3D (plus pop-up), never just along X. Zero-length sources pop straight up. */
+function hurtPlayer(dmg,sx,sz){
   if(settings.god) return; // god mode: no damage, no knockback
   if(P.invuln>0||state!=='play') return;
   P.hp=Math.max(0,P.hp-dmg); P.invuln=0.9; P.hurtF=0.2; P.flinch=0.3;
   trauma=Math.min(0.7,trauma+0.5); sfx.hurt();
   spawnParts(P.pos.x,P.pos.y+1.5,P.pos.z,10,0xef4444,9,0.6);
   var d=document.getElementById('dmg'); d.style.opacity=0.9; setTimeout(function(){d.style.opacity=0;},140);
-  var dir=P.pos.x<(fromX||P.pos.x)?-1:1;
-  P.vel.x=dir*9; P.vel.y=Math.max(P.vel.y,7);
+  var kx=P.pos.x-(sx===undefined?P.pos.x:sx), kz=P.pos.z-(sz===undefined?P.pos.z:sz);
+  var L=Math.hypot(kx,kz);
+  if(L>0.05){ P.vel.x=kx/L*9; P.vel.z=kz/L*9; }
+  P.vel.y=Math.max(P.vel.y,7);
 }
-function damageEnemy(e,dmg){
+function damageEnemy(e,dmg,src,force){
   if(!e.alive) return;
+  // Dormant Mech (pre-arena): attacks spark off a visible shield instead of
+  // vanishing into HP. Throttled feedback so beam spam doesn't flood floaters.
+  // (force bypasses for test/debug hooks only.)
+  if(e.type==='boss'&&e.dormant&&!force){
+    spawnParts(e.x,e.y+2.2,e.z,2,0xb794ff,6,0.3);
+    if(shieldMsgT<=0){ shieldMsgT=1.2; addFloater(e.x,e.y+4.6,e.z,'SHIELDED — WAKE THE ARENA','#b794ff'); beep(180,0.15,'square',0.07,120); }
+    return;
+  }
+  // Umbra-Mech plating shrugs off sustained beam fire (0.55x): hovering with
+  // heat vision pressures the boss but can never trivialize the fight.
+  if(e.type==='boss'&&src==='laser') dmg*=0.55;
   e.hp=Math.max(0,e.hp-dmg); e.flash=0.12;
   if(e.hp<=0){
     e.alive=false; score+=e.score; sfx.hit(); trauma=Math.min(0.7,trauma+0.3);
@@ -1488,7 +1613,7 @@ function update(dt){
   // camera-relative move (right = forward x up)
   camera.getWorldDirection(camFwd); camFwd.y=0;
   if(camFwd.lengthSq()<0.001) camFwd.set(1,0,0); else camFwd.normalize();
-  right2.crossVectors(camFwd,new THREE.Vector3(0,1,0)).normalize();
+  right2.crossVectors(camFwd,UPV).normalize();
   var wishX=0, wishZ=0;
   if(mv.x!==0||mv.z!==0){
     var il=1/Math.max(1,Math.hypot(mv.x,mv.z));
@@ -1496,7 +1621,7 @@ function update(dt){
     wishX=(camFwd.x*fx+right2.x*rx)*MOVE_SPEED;
     wishZ=(camFwd.z*fx+right2.z*rx)*MOVE_SPEED;
   }
-  var rate=P.onGround?26:(P.fly?17:8);
+  var rate=P.onGround?26:(P.fly?17:11); // responsive air control, never sluggish
   // ⚡ hyperspeed: hold Shift for +100% move speed on its own bar (ground + air)
   var wantBoost=boostKeyHeld()&&(P.hyper>1||settings.god)&&(mv.x!==0||mv.z!==0||P.fly);
   P.boost=wantBoost;
@@ -1535,10 +1660,10 @@ function update(dt){
   if(P.fly){
     // vertical: hold Space to climb, C (or ⤓) to dive, release to hover
     var descending=!!(keys.KeyC||keys.ControlLeft||touch.d);
-    var targetV=J?FLY_MAX_UP:(descending?-9:0.6);
-    P.vel.y+=(targetV-P.vel.y)*Math.min(1,4.2*dt);
+    var targetV=J?FLY_MAX_UP:(descending?-14:0.6);
+    P.vel.y+=(targetV-P.vel.y)*Math.min(1,(descending?6:4.2)*dt);
     if(P.vel.y>FLY_MAX_UP) P.vel.y=FLY_MAX_UP;
-    if(P.vel.y<-14) P.vel.y=-14;
+    if(P.vel.y<-18) P.vel.y=-18;
     // thrust costs full rate, hovering sips it — skilled pilots fly much further
     var drain=J?FLY_DRAIN:(descending?FLY_DIVE_DRAIN:FLY_HOVER_DRAIN);
     if(!settings.god) P.flight=Math.max(0,P.flight-drain*dt);
@@ -1626,6 +1751,14 @@ function update(dt){
       var dx=e.x-P.pos.x, dz=e.z-P.pos.z, dy=(e.y+1)- (P.pos.y+1.4);
       var fwd=dx*fx2+dz*fz;
       if(fwd>0&&fwd<3.4&&Math.abs(dx*fz-dz*fx2)<1.6&&Math.abs(dy)<2.4){
+        // no punching through walls: the floor you stand on never blocks
+        var plx=dx, ply=(e.y+1.2)-(P.pos.y+1.4), plz=dz;
+        var plL=Math.hypot(plx,ply,plz)||1;
+        var blocked=rayWorld(P.pos.x,P.pos.y+1.4,P.pos.z,plx/plL,ply/plL,plz/plL,plL,P.pos.y+0.5);
+        if(blocked>=0&&blocked<plL-0.3){
+          spawnParts(e.x,e.y+1.4,e.z,3,0x9aa3b2,6,0.3); // chips off the wall instead
+          continue;
+        }
         damageEnemy(e,P.fly?30:18); hit=true;
         spawnParts(e.x,e.y+1.4,e.z,8,0xffd23f,9,0.45);
         // knockback stays inside the next punch's reach: no whack-a-mole chase
@@ -1656,7 +1789,7 @@ function update(dt){
       if(aimDir.lengthSq()<0.01) camera.getWorldDirection(aimDir);
       aimDir.normalize();
     } else {
-      raycaster.setFromCamera(mouseSeen?mouseNDC:{x:0,y:0},camera);
+      raycaster.setFromCamera(mouseSeen?mouseNDC:ZERONDC,camera);
       aimDir.copy(raycaster.ray.direction);
       if(aimDir.lengthSq()<0.001) camera.getWorldDirection(aimDir);
       aimDir.normalize();
@@ -1666,12 +1799,9 @@ function update(dt){
     if(!settings.god) P.heat=Math.max(0,P.heat-LASER_DRAIN*dt);
     laserSfx();
     _muzzle.copy(eyePos).addScaledVector(aimDir,0.7);
-    // nearest wall along the ray (slab-tested against every solid)
-    var wallT=BEAM_LEN, si;
-    for(si=0;si<solids.length;si++){ var sb=solids[si];
-      var wt=rayBoxT(_muzzle.x,_muzzle.y,_muzzle.z,aimDir.x,aimDir.y,aimDir.z,sb.min,sb.max);
-      if(wt>=0&&wt<wallT) wallT=wt;
-    }
+    // nearest wall along the ray (grid-filtered slabs; the floor underfoot skipped)
+    var wallT=rayWorld(_muzzle.x,_muzzle.y,_muzzle.z,aimDir.x,aimDir.y,aimDir.z,BEAM_LEN,eyePos.y-0.5);
+    if(wallT<0) wallT=BEAM_LEN;
     // nearest target along the ray; the beam ends just past it
     var firstT=BEAM_LEN;
     for(i=0;i<enemies.length;i++){ var en0=enemies[i];
@@ -1696,11 +1826,28 @@ function update(dt){
       if(proj<-1||proj>endT+0.3||proj>wallT-0.1) continue;
       var px=cx-aimDir.x*proj, py=cy-aimDir.y*proj, pz=cz-aimDir.z*proj;
       if(Math.sqrt(px*px+py*py+pz*pz)<en.r+1.1){
-        damageEnemy(en,LASER_DPS*dt);
+        damageEnemy(en,LASER_DPS*dt,'laser');
+        // beam pressure shoves targets down-range (type-aware like punches)
+        if(en.type==='drone'){ en.px=(en.px||0)+aimDir.x*26*dt; en.pz=(en.pz||0)+aimDir.z*26*dt; }
+        else if(en.vx!==undefined){ en.vx=(en.vx||0)+aimDir.x*30*dt; if(en.vz!==undefined)en.vz=(en.vz||0)+aimDir.z*30*dt; }
         // impact flash exactly where the beam passes the enemy, not at its center
         if(Math.random()<0.6) spawnParts(
           _muzzle.x+aimDir.x*proj, _muzzle.y+aimDir.y*proj, _muzzle.z+aimDir.z*proj,
           2,0xff6a3d,7,0.3);
+      }
+    }
+    // orbs pop under the beam too (your counterplay to volleys)
+    for(i=0;i<OPOOL.length;i++){ var oo=OPOOL[i];
+      if(!oo.active) continue;
+      var ox=oo.mesh.position.x-_muzzle.x, oy=oo.mesh.position.y-_muzzle.y, oz=oo.mesh.position.z-_muzzle.z;
+      var opr=ox*aimDir.x+oy*aimDir.y+oz*aimDir.z;
+      if(opr<-1||opr>endT+0.3||opr>wallT-0.1) continue;
+      var ox2=ox-aimDir.x*opr, oy2=oy-aimDir.y*opr, oz2=oz-aimDir.z*opr;
+      if(Math.sqrt(ox2*ox2+oy2*oy2+oz2*oz2)<1.4){
+        oo.hp-=LASER_DPS*2*dt;
+        if(oo.hp<=0){ oo.active=false; oo.mesh.visible=false;
+          spawnParts(oo.mesh.position.x,oo.mesh.position.y,oo.mesh.position.z,10,0xc026d3,9,0.5);
+          score+=25; }
       }
     }
     if(endT<BEAM_LEN-1){ // stopped on something: plant a flare there
@@ -1753,9 +1900,14 @@ function update(dt){
   }
   for(i=0;i<rubble.length;i++){ var rb=rubble[i];
     if(rb.state==='flying'){
-      rb.vy-=30*dt; rb.x+=rb.vx*dt; rb.y+=rb.vy*dt; rb.z+=rb.vz*dt;
+      rb.vy-=30*dt;
+      // two substeps: thrown chunks are fast enough to skip thin geometry
+      var impact=false, st;
+      for(st=0;st<2&&!impact;st++){
+        rb.x+=rb.vx*dt*0.5; rb.y+=rb.vy*dt*0.5; rb.z+=rb.vz*dt*0.5;
+        if(pointInSolids(rb.x,rb.y,rb.z,0.45,false)) impact=true;
+      }
       rb.life-=dt; rb.mesh.position.set(rb.x,rb.y,rb.z); rb.mesh.rotation.x+=7*dt;
-      var impact=false;
       for(var j=0;j<enemies.length;j++){ var te=enemies[j];
         if(!te.alive) continue;
         var tdx=te.x-rb.x, tdz=te.z-rb.z, tdy=(te.y+1.2)-rb.y;
@@ -1812,15 +1964,65 @@ function update(dt){
         beep(90,0.6,'sawtooth',0.12,60);
       }
       var spd=ee.type==='boss'?(ee.enraged?3.4:2.6):(ee.base||2.2);
-      if(ee.type==='boss'){
+      if(ee.type==='boss'&&ee.dormant){
+        // dormant: hovering menacingly inside its shield, no AI, no contact
+        ee.mesh.position.set(ee.x,ee.y+Math.sin(ee.t*1.5)*0.3,ee.z);
+        ee.mesh.rotation.y+=0.4*dt;
+      }
+      else if(ee.type==='boss'){
         // chase X, strafe toward the player's lane, stay in the arena
         var bdx=P.pos.x-ee.x;
+        var bdz=P.pos.z-ee.z;
+        var bdist=Math.sqrt(bdx*bdx+bdz*bdz);
         ee.x+=Math.sign(bdx)*spd*dt+(ee.vx||0)*dt;
         ee.z+=(Math.max(-1,Math.min(1,(P.pos.z-ee.z)*0.6))*2.2+(ee.vz||0))*dt;
         if(ee.x<175){ ee.x=175; } if(ee.x>210){ ee.x=210; }
         ee.z=Math.max(-10,Math.min(10,ee.z));
         ee.vx=(ee.vx||0)*Math.max(0,1-6*dt); ee.vz=(ee.vz||0)*Math.max(0,1-6*dt);
-        ee.atkCD-=dt;
+        ee.atkCD-=dt; ee.orbCD-=dt; ee.chargeCD-=dt;
+        // CHARGE: committed ground lunge (telegraphed crouch first)
+        if(ee.chargeT>0){
+          ee.chargeT-=dt;
+          ee.mesh.scale.set(1.15,0.8,1.15);
+          if(ee.chargeT<=0){
+            ee.mesh.scale.set(1,1,1);
+            ee.charging=0.9; ee.chargeSpd=ee.enraged?30:24;
+            var cl=Math.hypot(bdx,bdz)||1;
+            ee.chargeDx=bdx/cl; ee.chargeDz=bdz/cl;
+            beep(90,0.5,'sawtooth',0.12,55); // roar
+          }
+        } else if(ee.charging>0){
+          ee.charging-=dt;
+          ee.x+=ee.chargeDx*ee.chargeSpd*dt; ee.z+=ee.chargeDz*ee.chargeSpd*dt;
+          if(ee.x<175) ee.x=175; if(ee.x>210) ee.x=210;
+          ee.z=Math.max(-10,Math.min(10,ee.z));
+          if(Math.random()<0.6) spawnParts(ee.x,0.4,ee.z,2,0x9aa3b2,8,0.4);
+          // runs you over, or eats a wall and sits out the stun
+          if(bdist<3.2&&P.invuln<=0){ hurtPlayer(16,ee.x,ee.z); P.vel.y=8; ee.charging=0; ee.chargeCD=ee.enraged?2.6:4; }
+          else if(pointInSolids(ee.x,1.5,ee.z,1.4,true)){
+            ee.charging=0; ee.chargeCD=ee.enraged?2.6:4; ee.atkCD=Math.max(ee.atkCD,1.5);
+            spawnParts(ee.x,1.5,ee.z,20,0x9aa3b2,12,0.6);
+            trauma=Math.min(0.7,trauma+0.4); beep(70,0.4,'sawtooth',0.12,35);
+            addFloater(ee.x,ee.y+4.5,ee.z,'STUNNED!','#4ade80');
+          }
+          else if(ee.charging<=0) ee.chargeCD=ee.enraged?2.6:4;
+        }
+        // ORB VOLLEY telegraph: white eyes + rising whine, then a spread at
+        // your predicted position — the answer to hover-camping
+        else if(ee.orbTele>0){
+          ee.orbTele-=dt;
+          ee.eye.material=MAT.eyeWhite;
+          if(ee.orbTele<=0){
+            ee.eye.material=MAT.eyeRed;
+            ee.orbCD=ee.enraged?2.0:3.2;
+            var shots=ee.enraged?4:3;
+            for(var os=0;os<shots;os++){
+              _v1.set((P.pos.x+P.vel.x*0.4)-ee.x+((os-(shots-1)/2)*3),(P.pos.y+1.2)- (ee.y+2.5),(P.pos.z+P.vel.z*0.4)-ee.z).normalize();
+              fireOrb(ee.x+(os-(shots-1)/2)*1.6,ee.y+2.5,ee.z,_v1.x,_v1.y,_v1.z);
+            }
+            sfx.shoot();
+          }
+        }
         if(ee.tele>0){ // TELEGRAAPHED SLAM: red ring grows at his feet…
           ee.tele-=dt;
           ee.eye.material=MAT.eyeWhite;
@@ -1835,16 +2037,54 @@ function update(dt){
             trauma=Math.min(0.7,trauma+0.55); beep(70,0.5,'sawtooth',0.12,35);
           }
         }
-        else if(Math.abs(bdx)<11&&ee.y<=0.1&&ee.atkCD<=0&&!grace){
-          ee.tele=0.8; beep(200,0.7,'sawtooth',0.07,900); // rising warning tone
+        // attack selection: idle only (never stacked), matched to your position —
+        // slam for grounded close range, charge for mid range, orbs for air/far
+        else if(ee.chargeT<=0&&ee.charging<=0&&ee.orbTele<=0&&!grace){
+          if(Math.abs(bdx)<11&&ee.y<=0.1&&ee.atkCD<=0){ ee.tele=0.8; bossAtkCount++; beep(200,0.7,'sawtooth',0.07,900); }
+          else if(ee.chargeCD<=0&&bdist>8&&bdist<26&&P.pos.y<5){ ee.chargeT=0.6; bossAtkCount++; beep(150,0.5,'sawtooth',0.1,90); }
+          else if(ee.orbCD<=0&&(P.pos.y>5||bdist>13)){ ee.orbTele=0.5; bossAtkCount++; beep(400,0.45,'square',0.06,1200); }
         }
         if(Math.abs(bdx)<12&&ee.y<=0.1&&Math.random()<0.008) ee.vy=11; // rare hop keeps the arena lively
       } else {
-        ee.x+=(spd+(ee.vx||0))*dt;
+        // --- foot-troop brain: PATROL / CHASE / WINDUP / RECOVER ---
+        // decisions tick at ~12Hz (staggered); steering runs every step.
+        if(!ee.mode) ee.mode='patrol';
+        var wdx=P.pos.x-ee.x, wdz=P.pos.z-ee.z, wdy=P.pos.y-ee.y;
+        var wd2=wdx*wdx+wdz*wdz;
+        ee.thinkT=(ee.thinkT||0)-dt;
+        if(ee.mode==='patrol'){
+          ee.x+=(spd+(ee.vx||0))*dt;
+          if(ee.x-ee.spawnX>7||ee.x-ee.spawnX<-7) ee.base*=-1;
+          ee.z+=Math.sin(ee.t*0.7+ee.ph)*1.6*dt;
+          ee.mesh.rotation.y=Math.sin(ee.t*2)*0.1;
+          if(!grace&&ee.thinkT<=0){ ee.thinkT=0.12; if(wd2<196&&Math.abs(wdy)<5) ee.mode='chase'; }
+        } else if(ee.mode==='chase'){
+          var cl=Math.hypot(wdx,wdz)||1, ch=(Math.abs(ee.base)*1.5+1.2);
+          ee.x+=(wdx/cl*ch+(ee.vx||0))*dt; ee.z+=(wdz/cl*ch)*dt;
+          ee.mesh.rotation.y=Math.atan2(wdx,wdz);
+          if(ee.thinkT<=0){ ee.thinkT=0.12;
+            if(wd2>324||Math.abs(wdy)>6||Math.abs(ee.x-ee.spawnX)>25) ee.mode='patrol'; // leash
+            else if(wd2<6.5){ ee.mode='windup'; ee.stT=(ee.type==='brute'?0.5:0.35);
+              ee.eyeM.material=MAT.eyeWhite; beep(660,0.3,'square',0.05,990); } // telegraph tick
+          }
+        } else if(ee.mode==='windup'){
+          ee.stT-=dt; // planted feet, blazing eye: the swipe is coming — move!
+          ee.mesh.rotation.y=Math.atan2(wdx,wdz);
+          if(ee.stT<=0){
+            ee.eyeM.material=MAT.eyeRed; ee.mode='recover'; ee.stT=0.7;
+            var swl=Math.hypot(wdx,wdz)||1;
+            if(wd2<9&&Math.abs(wdy)<3&&P.invuln<=0){
+              hurtPlayer(ee.type==='brute'?10:6,ee.x,ee.z);
+              P.vel.x+=wdx/swl*7; P.vel.z+=wdz/swl*7; // shoved by the swipe
+            }
+            spawnParts(ee.x,1.2,ee.z,6,0xffd23f,7,0.35);
+          }
+        } else { // recover: sluggish and open to punishment
+          ee.stT-=dt;
+          ee.x+=(ee.vx||0)*dt; ee.z+=(ee.vz||0)*0.3*dt;
+          if(ee.stT<=0) ee.mode='patrol';
+        }
         ee.vx=(ee.vx||0)*Math.max(0,1-6*dt);
-        if(ee.x-ee.spawnX>7||ee.x-ee.spawnX<-7) ee.base*=-1;
-        // lane drift around the home avenue, never into the blocks
-        ee.z+=(Math.sin(ee.t*0.7+ee.ph)*1.6+(ee.vz||0))*dt;
         ee.vz=(ee.vz||0)*Math.max(0,1-6*dt);
         if(ee.z>ee.spawnZ+6){ ee.z=ee.spawnZ+6; } if(ee.z<ee.spawnZ-6){ ee.z=ee.spawnZ-6; }
         ee.z=Math.max(-64,Math.min(64,ee.z));
@@ -1853,7 +2093,7 @@ function update(dt){
       if(ee.y<=0){ ee.y=0; ee.vy=0; }
       pushOutBld(ee,1.1,ee.y,ee.y+2); // slide around towers, never through them
       ee.mesh.position.set(ee.x,ee.y,ee.z);
-      ee.mesh.rotation.y=Math.sin(ee.t*2)*0.1+(ee.type==='boss'?(ee.x<P.pos.x?0.2:-0.2):0);
+      if(ee.type==='boss') ee.mesh.rotation.y=Math.sin(ee.t*2)*0.1+(ee.x<P.pos.x?0.2:-0.2);
       // waddle cycle + eye throb for foot troops (the boss stomps, not waddles)
       if(ee.type!=='boss'){
         var wsw=Math.sin(ee.t*(ee.type==='brute'?6.5:9));
@@ -1865,29 +2105,75 @@ function update(dt){
       }
       else ee.mesh.position.y+=Math.abs(Math.sin(ee.t*3))*0.1; // boss road-stomp
       var ex=ee.x-P.pos.x, ez=ee.z-P.pos.z, ey=ee.y-P.pos.y;
-      if(!grace&&ex*ex+ez*ez<(ee.type==='boss'?5.5:3.4)&&Math.abs(ey)<2.8&&P.invuln<=0)
-        hurtPlayer(ee.type==='boss'?14:(ee.type==='brute'?10:6),ee.x);
+      if(!grace&&!(ee.type==='boss'&&ee.dormant)&&ex*ex+ez*ez<(ee.type==='boss'?5.5:3.4)&&Math.abs(ey)<2.8&&P.invuln<=0)
+        hurtPlayer(ee.type==='boss'?14:(ee.type==='brute'?10:6),ee.x,ee.z);
     } else if(ee.type==='drone'){
-      // elliptical patrols around the home avenue + positional punch knockback
-      ee.x=ee.baseX+Math.cos(ee.t*0.55+ee.ph)*ee.range*0.6+(ee.px||0);
-      ee.z=ee.baseZ+Math.sin(ee.t*0.45+ee.ph)*4+(ee.pz||0);
+      // gunner brain: ORBIT / SEEK / ENGAGE. Fires only with real 3D range
+      // AND line of sight (no shooting through towers), telegraphs the shot.
+      if(ee.mode===undefined) ee.mode='orbit';
+      var gx=P.pos.x-ee.x, gy=(P.pos.y+1.2)-ee.y, gz=P.pos.z-ee.z;
+      var gd=Math.sqrt(gx*gx+gy*gy+gz*gz);
+      ee.thinkT=(ee.thinkT||0)-dt;
+      var hasLOS=false;
+      if(gd<34){
+        _v1.set(gx,gy,gz);
+        if(gd>0.01){ _v1.multiplyScalar(1/gd);
+          hasLOS=rayWorld(ee.x,ee.y,ee.z,_v1.x,_v1.y,_v1.z,gd,ee.y-6)<0;
+        }
+      }
+      if(ee.thinkT<=0){ ee.thinkT=0.12;
+        if(ee.mode==='orbit'){ if(!grace&&hasLOS&&gd<30) ee.mode='engage'; else if(!grace&&gd<30) ee.mode='seek'; }
+        else if(ee.mode==='seek'){ if(hasLOS&&gd<26) ee.mode='engage'; else if(gd>40) ee.mode='orbit'; }
+        else { if(!hasLOS||gd>32) ee.mode='seek'; }
+      }
+      var dvx=0, dvy=0, dvz=0;
+      if(ee.mode==='orbit'){
+        dvx=(ee.baseX+Math.cos(ee.t*0.55+ee.ph)*ee.range*0.6-ee.x)*2;
+        dvz=(ee.baseZ+Math.sin(ee.t*0.45+ee.ph)*4-ee.z)*2;
+        dvy=(ee.baseY+Math.sin(ee.t*2.4)*1.2-ee.y)*2;
+      } else if(ee.mode==='seek'){
+        // climb to a firing lane above the street, biased off the player's lane
+        var wantY=Math.max(ee.baseY,P.pos.y+6);
+        dvx=(P.pos.x-ee.x)*0.8; dvz=(P.pos.z-ee.z)*0.8; dvy=(wantY-ee.y)*1.5;
+      } else { // engage: hold a 12-18u shell, back off when crowded
+        var wantD=gd<12?-1:(gd>20?1:0);
+        dvx=gx/(gd||1)*wantD*7; dvz=gz/(gd||1)*wantD*7;
+        dvy=((P.pos.y+4)-ee.y)*1.2;
+        dvx+=Math.cos(ee.t*1.1+ee.ph)*1.5; dvz+=Math.sin(ee.t*0.9+ee.ph)*1.5; // strafe drift
+      }
+      var dsp=7;
+      ee.vx+=((dvx+(ee.px||0)*4)-ee.vx)*Math.min(1,3*dt);
+      ee.vz+=((dvz+(ee.pz||0)*4)-ee.vz)*Math.min(1,3*dt);
+      ee.vy+=((dvy)-ee.vy)*Math.min(1,3*dt);
       ee.px=(ee.px||0)*Math.max(0,1-5*dt); ee.pz=(ee.pz||0)*Math.max(0,1-5*dt);
-      ee.y=ee.baseY+Math.sin(ee.t*2.4)*1.2;
+      var vl=Math.hypot(ee.vx,ee.vz);
+      if(vl>dsp){ ee.vx*=dsp/vl; ee.vz*=dsp/vl; }
+      ee.x+=ee.vx*dt; ee.y+=ee.vy*dt; ee.z+=ee.vz*dt;
+      ee.y=Math.max(3,Math.min(26,ee.y));
+      pushOutBld(ee,1.0,ee.y-0.8,ee.y+0.8); // never nest inside a tower
       ee.mesh.position.set(ee.x,ee.y,ee.z);
-      // bank into the patrol curve + spin the rotor bar
-      ee.mesh.rotation.z=-Math.cos(ee.t*0.55+ee.ph)*0.22;
-      ee.mesh.rotation.x=Math.cos(ee.t*0.45+ee.ph)*0.15;
+      // bank into motion + spin the rotor bar
+      ee.mesh.rotation.z=Math.max(-0.4,Math.min(0.4,-ee.vx*0.05));
+      ee.mesh.rotation.x=Math.max(-0.3,Math.min(0.3,ee.vz*0.05));
       if(ee.rotor) ee.rotor.rotation.y+=12*dt;
       ee.shootT-=dt;
-      var pdx=P.pos.x-ee.x;
-      if(!grace&&ee.shootT<=0&&Math.abs(pdx)<26&&P.pos.x>14){
-        ee.shootT=1.7+Math.random()*0.9;
-        _v1.set(P.pos.x-ee.x,(P.pos.y+1.2)-ee.y,P.pos.z-ee.z).normalize();
-        fireBullet(ee.x,ee.y,ee.z,_v1.x*11,_v1.y*11,_v1.z*11);
-        sfx.shoot();
-      }
+      if(ee.mode==='engage'&&!grace&&hasLOS&&gd<26&&P.pos.x>14){
+        if(ee.teleT===undefined||ee.teleT<=0){
+          if(ee.shootT<=0){ ee.teleT=0.35; beep(900,0.3,'square',0.05,1400); } // telegraph whine
+        } else {
+          ee.teleT-=dt;
+          ee.core.material=MAT.eyeWhite;
+          if(ee.teleT<=0){
+            ee.shootT=1.7+Math.random()*0.9;
+            ee.core.material=MAT.eyeRed;
+            _v1.set(P.pos.x-ee.x,(P.pos.y+1.2)-ee.y,P.pos.z-ee.z).normalize();
+            fireBullet(ee.x,ee.y,ee.z,_v1.x*11,_v1.y*11,_v1.z*11);
+            sfx.shoot();
+          }
+        }
+      } else if(ee.core){ ee.core.material=MAT.eyeRed; }
       var ddx2=ee.x-P.pos.x, ddz2=ee.z-P.pos.z;
-      if(!grace&&ddx2*ddx2+ddz2*ddz2<2.6&&Math.abs(ee.y-(P.pos.y+1.4))<2&&P.invuln<=0){ hurtPlayer(6,ee.x); P.vel.y=8; }
+      if(!grace&&ddx2*ddx2+ddz2*ddz2<2.6&&Math.abs(ee.y-(P.pos.y+1.4))<2&&P.invuln<=0){ hurtPlayer(6,ee.x,ee.z); P.vel.y=8; }
     } else if(ee.type==='dasher'){
       // volt-dasher: hover → flash telegraph → committed dive → recover
       ee.stT-=dt;
@@ -1908,9 +2194,24 @@ function update(dt){
         ee.x+=ee.dx*dt; ee.y+=ee.dy*dt; ee.z+=ee.dz*dt;
         ee.core.material=MAT.eyeWhite;
         if(Math.random()<0.5) spawnParts(ee.x,ee.y,ee.z,1,0xff6a3d,3,0.3);
-        var dhx=ee.x-P.pos.x, dhz=ee.z-P.pos.z;
-        if(dhx*dhx+dhz*dhz<2.2&&Math.abs(ee.y-(P.pos.y+1.2))<1.8&&P.invuln<=0){ hurtPlayer(9,ee.x); }
-        if(ee.stT<=0){ ee.mode='rest'; ee.stT=1.6; }
+        // committed trajectory meets the world: crash, self-damage, stun
+        if(pointInSolids(ee.x,ee.y,ee.z,0.9,false)){
+          ee.mode='stun'; ee.stT=1.2;
+          damageEnemy(ee,8);
+          spawnParts(ee.x,ee.y,ee.z,20,0x9aa3b2,10,0.6);
+          beep(120,0.3,'square',0.1,60);
+          var sdx=ee.x-P.pos.x, sdz=ee.z-P.pos.z;
+          if(sdx*sdx+sdz*sdz<625&&!RM) trauma=Math.min(0.7,trauma+0.2);
+        } else {
+          var dhx=ee.x-P.pos.x, dhz=ee.z-P.pos.z;
+          if(dhx*dhx+dhz*dhz<2.2&&Math.abs(ee.y-(P.pos.y+1.2))<1.8&&P.invuln<=0){ hurtPlayer(9,ee.x,ee.z); }
+          if(ee.stT<=0){ ee.mode='rest'; ee.stT=1.6; }
+        }
+      } else if(ee.mode==='stun'){ // crashed: pinwheeling, wide open
+        ee.stT-=dt;
+        ee.mesh.rotation.y+=9*dt;
+        if(Math.random()<0.3) spawnParts(ee.x,ee.y+0.8,ee.z,2,0xffd23f,5,0.4);
+        if(ee.stT<=0){ ee.mode='rest'; ee.stT=1.0; }
       } else { // rest: drift home, vulnerable
         ee.x+=(ee.baseX-ee.x)*Math.min(1,1.5*dt);
         ee.y+=(ee.baseY-ee.y)*Math.min(1,1.5*dt);
@@ -1945,18 +2246,42 @@ function update(dt){
     if(slamRing){ slamRing.visible=true; slamRing.position.set(slamX,0.18,slamZ); slamRing.scale.set(Math.max(0.1,br),Math.max(0.1,br),1); }
     if(!slamHit){
       var swx=P.pos.x-slamX, swz=P.pos.z-slamZ, swd=Math.sqrt(swx*swx+swz*swz);
-      if(Math.abs(swd-br)<1.3&&P.pos.y<2.5&&P.invuln<=0){ slamHit=true; hurtPlayer(14,slamX); P.vel.y=9; }
+      if(Math.abs(swd-br)<1.3&&P.pos.y<2.5&&P.invuln<=0){ slamHit=true; hurtPlayer(14,slamX,slamZ); P.vel.y=9; }
     }
     if(slamT<=0){ slamMode='hide'; if(slamRing) slamRing.visible=false; }
   }
-  // pooled enemy bullets
+  // pooled enemy bullets: player hits + world impacts (no shooting through walls)
   for(i=0;i<BPOOL.length;i++){ var b=BPOOL[i];
     if(!b.active) continue;
     b.mesh.position.x+=b.vx*dt; b.mesh.position.y+=b.vy*dt; b.mesh.position.z+=b.vz*dt; b.life-=dt;
     var bp=b.mesh.position;
     var hitP=(bp.x-P.pos.x)*(bp.x-P.pos.x)+(bp.z-P.pos.z)*(bp.z-P.pos.z)<1.2&&Math.abs(bp.y-(P.pos.y+1.4))<1.6;
-    if(hitP&&P.invuln<=0){ hurtPlayer(5,bp.x); b.active=false; b.mesh.visible=false; continue; }
-    if(b.life<=0||bp.y<0){ b.active=false; b.mesh.visible=false; }
+    if(hitP&&P.invuln<=0){ hurtPlayer(5,bp.x- b.vx*0.2,bp.z-b.vz*0.2); b.active=false; b.mesh.visible=false; continue; }
+    if(b.life<=0||bp.y<0){ b.active=false; b.mesh.visible=false; continue; }
+    if(pointInSolids(bp.x,bp.y,bp.z,0.3,false)){
+      spawnParts(bp.x,bp.y,bp.z,4,0xff8a5c,6,0.35);
+      b.active=false; b.mesh.visible=false;
+    }
+  }
+  // boss orbs: limited homing (dodgeable), poppable, die on walls
+  for(i=0;i<OPOOL.length;i++){ var ob=OPOOL[i];
+    if(!ob.active) continue;
+    _v1.set(P.pos.x-ob.mesh.position.x,(P.pos.y+1.2)-ob.mesh.position.y,P.pos.z-ob.mesh.position.z).normalize();
+    ob.vx+=(_v1.x*11-ob.vx)*Math.min(1,2.5*dt);
+    ob.vy+=(_v1.y*11-ob.vy)*Math.min(1,2.5*dt);
+    ob.vz+=(_v1.z*11-ob.vz)*Math.min(1,2.5*dt);
+    ob.mesh.position.x+=ob.vx*dt; ob.mesh.position.y+=ob.vy*dt; ob.mesh.position.z+=ob.vz*dt;
+    ob.life-=dt;
+    var op=ob.mesh.position;
+    var odx=op.x-P.pos.x, ody=op.y-(P.pos.y+1.2), odz=op.z-P.pos.z;
+    if(odx*odx+ody*ody+odz*odz<1.7&&P.invuln<=0){ hurtPlayer(10,op.x,op.z); ob.active=false; ob.mesh.visible=false;
+      spawnParts(op.x,op.y,op.z,10,0xc026d3,9,0.5); continue; }
+    if(ob.life<=0||pointInSolids(op.x,op.y,op.z,0.35,false)){
+      ob.active=false; ob.mesh.visible=false;
+      spawnParts(op.x,op.y,op.z,8,0xc026d3,8,0.45);
+    } else {
+      var os=1+Math.sin(animT*14)*0.18; ob.mesh.scale.set(os,os,os);
+    }
   }
   updateParts(dt);
   // clouds drift
@@ -1971,6 +2296,7 @@ function update(dt){
   // boss introduction the first time you near the arena
   if(!bossIntro&&P.pos.x>165){
     bossIntro=true;
+    var ib=bossObj(); if(ib) ib.dormant=false; // shield drops: the fight is real now
     if(bossBarEl) bossBarEl.style.display='block';
     showBanner('⚠ UMBRA-MECH ONLINE — dodge the red ring!','warn',3.2);
     beep(70,0.9,'sawtooth',0.12,45);
@@ -1980,8 +2306,8 @@ function update(dt){
   if(bb&&bossBarEl){
     if(!bossDown){
       var bf=Math.max(0,bb.hp/bb.maxhp);
-      bossFillEl.style.width=(bf*100)+'%';
-      bossMeterEl.setAttribute('aria-valuenow',Math.round(bf*100));
+      setW(bossFillEl,bf*100);
+      setAria(bossMeterEl,bf*100);
     } else bossBarEl.style.display='none';
   }
   // checkpoints: touch the ring, respawn here on a fall
@@ -2007,6 +2333,7 @@ function update(dt){
     if(finishDenyT>0){ finishDenyT-=dt; var rp=1+Math.sin(animT*20)*0.12; finishRefs.ring.scale.set(1.9*rp,1.9*rp,1.9*rp); }
   }
   if(denyCD>0) denyCD-=dt;
+  if(shieldMsgT>0) shieldMsgT-=dt;
   // death is evaluated BEFORE victory: zero health can never win the same update
   if(state==='play'&&P.hp<=0){ P.hp=0; onDeath(); return; }
   var fdx=P.pos.x-214, fdz=P.pos.z-0;
@@ -2117,6 +2444,7 @@ function animateHero(dt,t){
 /* ================= CAMERA ================= */
 var camPos=new THREE.Vector3(-6,10.5,0), camLook=new THREE.Vector3();
 var camYaw=Math.PI/2; // smoothed follow yaw: rests behind travel direction
+var camDist=14; // smoothed boom length: collision shortens, open sky restores
 function updateCamera(dt){
   // Third-person mouse look (UNDEFEATED/GTA-style): the cursor works like a
   // joystick — offset from center turns/pitches the camera at a rate, so the
@@ -2161,9 +2489,22 @@ function updateCamera(dt){
     P.pos.x-fx*14,
     Math.max(2.2,P.pos.y+7.5+orbitPitch*10),
     P.pos.z-fz*14);
+  // camera collision: buildings between hero and boom shorten it smoothly.
+  // Shortens fast (no clipping into towers), re-extends slowly (no snapping).
+  var hy=P.pos.y+2.2;
+  _v1.set(_want.x-P.pos.x,_want.y-hy,_want.z-P.pos.z);
+  var boomLen=_v1.length();
+  if(boomLen>0.01){
+    _v1.multiplyScalar(1/boomLen);
+    var hitT=rayWorld(P.pos.x,hy,P.pos.z,_v1.x,_v1.y,_v1.z,boomLen,hy-1.2);
+    var wantDist=(hitT>=0)?Math.max(3,hitT-1.2):boomLen;
+    camDist+= (wantDist-camDist)*Math.min(1,((wantDist<camDist)?12:3)*dt);
+    _want.set(P.pos.x+_v1.x*camDist,hy+_v1.y*camDist,P.pos.z+_v1.z*camDist);
+  }
   // fade any platform crowding the camera: closest-point-on-box distance,
   // eased opacities, depth-write off while faded so the hero shows through
-  for(var fi=0;fi<solids.length;fi++){ var so=solids[fi];
+  querySolids(camera.position.x-11,camera.position.z-11,camera.position.x+11,camera.position.z+11);
+  for(var fi=0;fi<_qarr.length;fi++){ var so=_qarr[fi];
     if(so.noFade) continue;
     var cx=Math.max(so.min.x,Math.min(camera.position.x,so.max.x));
     var cy=Math.max(so.min.y,Math.min(camera.position.y,so.max.y));
@@ -2210,43 +2551,48 @@ var htLabel=document.getElementById('ht-label'), boLabel=document.getElementById
 var scoreEl=document.getElementById('score'), metaEl=document.getElementById('meta');
 var progFill=document.getElementById('prog-fill');
 var hudTick=0;
+var hpMeterEl=document.getElementById('hp-meter'), flMeterEl=document.getElementById('fl-meter');
+var htMeterEl=document.getElementById('ht-meter'), boMeterEl=document.getElementById('bo-meter');
+// change-gated DOM writes: layout/style work only happens when text changes
+function setText(el,txt){ if(el._t!==txt){ el._t=txt; el.textContent=txt; } }
+function setW(el,pct){ var w=(Math.round(pct*10)/10)+'%'; if(el._w!==w){ el._w=w; el.style.width=w; } }
+function setAria(el,v){ v=Math.round(v); if(el._a!==v){ el._a=v; el.setAttribute('aria-valuenow',v); } }
 function updateHUD(){
   if(++hudTick%3!==0) return;
   var hp=Math.max(0,Math.min(100,P.hp)), fl=Math.max(0,Math.min(100,P.flight));
   var ht=Math.max(0,Math.min(100,P.heat)), bo=Math.max(0,Math.min(100,P.hyper));
-  hpFill.style.width=hp+'%'; flFill.style.width=fl+'%';
-  htFill.style.width=ht+'%'; boFill.style.width=bo+'%';
-  document.getElementById('hp-meter').setAttribute('aria-valuenow',Math.round(hp));
-  document.getElementById('fl-meter').setAttribute('aria-valuenow',Math.round(fl));
-  document.getElementById('ht-meter').setAttribute('aria-valuenow',Math.round(ht));
-  document.getElementById('bo-meter').setAttribute('aria-valuenow',Math.round(bo));
-  hpLabel.textContent='❤ HEALTH '+Math.max(0,Math.ceil(P.hp))+(P.fly?'  ✈ FLYING':'')+(P.boost?'  ⚡HYPER':'');
-  flLabel.textContent='✈ FLIGHT '+Math.floor(P.flight);
-  htLabel.textContent='👁 HEAT '+Math.floor(P.heat);
-  boLabel.textContent='⚡ HYPER '+Math.floor(P.hyper);
-  scoreEl.textContent='SCORE '+score;
-  metaEl.textContent='👪 '+rescued+'/5  💛×'+lives+'  ⏱ '+Math.floor(gameTime)+'s';
-  progFill.style.width=(Math.max(0,Math.min(1,P.pos.x/214))*100)+'%';
+  setW(hpFill,hp); setW(flFill,fl); setW(htFill,ht); setW(boFill,bo);
+  setAria(hpMeterEl,hp); setAria(flMeterEl,fl); setAria(htMeterEl,ht); setAria(boMeterEl,bo);
+  setText(hpLabel,'❤ HEALTH '+Math.max(0,Math.ceil(P.hp))+(P.fly?'  ✈ FLYING':'')+(P.boost?'  ⚡HYPER':''));
+  setText(flLabel,'✈ FLIGHT '+Math.floor(P.flight));
+  setText(htLabel,'👁 HEAT '+Math.floor(P.heat));
+  setText(boLabel,'⚡ HYPER '+Math.floor(P.hyper));
+  setText(scoreEl,'SCORE '+score);
+  setText(metaEl,'👪 '+rescued+'/5  💛×'+lives+'  ⏱ '+Math.floor(gameTime)+'s');
+  setW(progFill,Math.max(0,Math.min(1,P.pos.x/214))*100);
   // objectives panel: the critical path at a glance
   var open=rescued>=5&&bossDown;
-  elCiv.textContent='👪 Citizens '+rescued+'/5';
-  elCiv.className='obj'+(rescued>=5?' done':'');
-  elBoss.textContent=bossDown?'🤖 Mech: DOWN':'🤖 Mech: ACTIVE';
-  elBoss.className='obj'+(bossDown?' done':'');
-  elBeacon.textContent=open?'🗼 Beacon: OPEN':'🗼 Beacon: LOCKED';
-  elBeacon.className='obj'+(open?' open':'');
+  setText(elCiv,'👪 Citizens '+rescued+'/5');
+  var cc='obj'+(rescued>=5?' done':''); if(elCiv._c!==cc){ elCiv._c=cc; elCiv.className=cc; }
+  setText(elBoss,bossDown?'🤖 Mech: DOWN':'🤖 Mech: ACTIVE');
+  var bc='obj'+(bossDown?' done':''); if(elBoss._c!==bc){ elBoss._c=bc; elBoss.className=bc; }
+  setText(elBeacon,open?'🗼 Beacon: OPEN':'🗼 Beacon: LOCKED');
+  var kc='obj'+(open?' open':''); if(elBeacon._c!==kc){ elBeacon._c=kc; elBeacon.className=kc; }
 }
 
 /* ================= LOOP ================= */
 var last=performance.now(), acc=0, animT=0;
 crossEl=document.getElementById('cross');
-// adaptive quality: auto mode steps pixel-ratio down (then shadows off) when
-// the frame EMA stays slow; High/Low pins it. Persisted via settings.
-var qLevel=0, frameEMA=1/60, qFrames=0;
+// adaptive quality: auto mode tracks TRUE elapsed frame time (EMA of real
+// rAF deltas, not sim steps), steps down past 26ms and RECOVERS below 13.5ms
+// after consecutive good windows. Touch devices start one step down.
+var qLevel=0, frameEMA=1/60, qFrames=0, qGood=0;
 function applyQuality(resetAuto){
   if(settings.quality==='low') qLevel=3;
   else if(settings.quality==='high') qLevel=0;
-  else if(resetAuto) qLevel=0;
+  else {
+    if(resetAuto) qLevel=(document.body.classList.contains('touch')||((window.devicePixelRatio||1)>2.5))?1:0;
+  }
   var dprs=[Math.min(window.devicePixelRatio||1,2),1.5,1.25,1];
   renderer.setPixelRatio(dprs[Math.min(3,qLevel)]);
   sun.castShadow=qLevel<3;
@@ -2256,11 +2602,14 @@ function frame(now){
   var delta=(now-last)/1000; last=now;
   if(!(delta>0)) delta=STEP;
   if(delta>0.1) delta=0.1;
-  // quality monitor (auto only): 4s windows, one step per window max
+  // quality monitor (auto only): 4s windows, one step per window max,
+  // recovery needs two straight good windows to avoid oscillation
   frameEMA+=(delta-frameEMA)*0.04;
   if(settings.quality==='auto'&&++qFrames>=240){
     qFrames=0;
-    if(frameEMA>0.026&&qLevel<3){ qLevel++; applyQuality(false); }
+    if(frameEMA>0.026&&qLevel<3){ qLevel++; qGood=0; applyQuality(false); }
+    else if(frameEMA<0.0135&&qLevel>0){ if(++qGood>=2){ qGood=0; qLevel--; applyQuality(false); } }
+    else qGood=0;
   }
   if(endLock>0) endLock-=delta;
   if(bannerTimer>0){ bannerTimer-=delta; if(bannerTimer<=0&&bannerEl) bannerEl.className=''; }
@@ -2296,6 +2645,13 @@ function frame(now){
   } else compassG.visible=false;
   // custom cursor: follows the real mouse — or pins to the lock target
   if(locked&&(!locked.alive||state!=='play')) setLock(null);
+  // dormant-boss shield bubble tracks the Mech until the arena wakes it
+  var db=bossObj();
+  if(db&&db.alive&&db.dormant){
+    bossShield.visible=true;
+    bossShield.position.set(db.x,db.y+2.2,db.z);
+    var sb=1+Math.sin(animT*3)*0.04; bossShield.scale.set(3.6*sb,3.6*sb,3.6*sb);
+  } else bossShield.visible=false;
   if(locked&&locked.alive&&state==='play'&&!paused){
     lockMarker.visible=true;
     lockMarker.position.set(locked.x,locked.y+2.6+Math.sin(animT*5)*0.15,locked.z);
@@ -2334,7 +2690,8 @@ window.__game={
       var dx=e.x-P.pos.x,dz=e.z-P.pos.z,d=Math.sqrt(dx*dx+dz*dz);if(d<m)m=d;}return +m.toFixed(1);})(),
     beam:{end:+lastBeamT.toFixed(1), hit:lastBeamHit},
     lock:!!(locked&&locked.alive), boostR:+P.boostR.toFixed(2), boom:boomCount,
-    carry:!!carrying, yaw:+camYaw.toFixed(2) }; },
+    carry:!!carrying, yaw:+camYaw.toFixed(2), atk:bossAtkCount, orbs:orbCount,
+    rbgone:(function(){var n=0;for(var i=0;i<rubble.length;i++)if(rubble[i].state!=='ground')n++;return n;})() }; },
   mem:function(){ return {nodes:countNodes(scene), geo:renderer.info.memory.geometries,
     tex:renderer.info.memory.textures, parts:activeParts(), bullets:activeBullets(),
     calls:renderer.info.render.calls}; },
@@ -2343,7 +2700,7 @@ window.__game={
   setHp:function(n){ P.hp=n; },
   setLives:function(n){ lives=n; },
   hurt:function(n){ P.invuln=0; hurtPlayer(n,P.pos.x+1); },
-  killBoss:function(){ var b=bossObj(); if(b) damageEnemy(b,99999); },
+  killBoss:function(){ var b=bossObj(); if(b) damageEnemy(b,99999,'debug',true); },
   rescueAll:function(){ for(var i=0;i<civilians.length;i++){ var c=civilians[i];
     if(!c.rescued){ c.rescued=true; c.mark.visible=false; c.beacon.visible=false; c.body.material=MAT.civSaved; rescued++; } } },
   give:function(o){ for(var k in o){ P[k]=o[k]; } },
@@ -2352,6 +2709,11 @@ window.__game={
       var dx=e.x-P.pos.x, dz=e.z-P.pos.z, d=dx*dx+dz*dz;
       if(d<m){ m=d; out={x:+e.x.toFixed(1), z:+e.z.toFixed(1), hp:Math.ceil(e.hp), type:e.type}; } }
     return out; },
+  // deterministic tall wall for collision tests (not part of the level).
+  // NOTE: anything added to solids at runtime MUST refresh the grid, or every
+  // grid query (collide, laser, pushout, AI) will walk straight through it.
+  debugWall:function(x,z){ solids.push({min:new THREE.Vector3(x-2,0,z-2),max:new THREE.Vector3(x+2,6,z+2),
+    mesh:null, edge:null, fade:1, noFade:true, bld:false}); rebuildGrid(); },
   dbg:{scene:scene, camera:camera, renderer:renderer}
 };
 function countNodes(o){ var n=1; for(var i=0;i<o.children.length;i++) n+=countNodes(o.children[i]); return n; }
