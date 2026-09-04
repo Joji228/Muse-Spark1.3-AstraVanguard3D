@@ -14,8 +14,6 @@
 [![No build step](https://img.shields.io/badge/build-none-4ade80)]()
 [![Play online](https://img.shields.io/badge/play-GitHub%20Pages-ffd700)]()
 
-## 🎮 [▶️ Play it right now in your browser](https://joji228.github.io/Muse-Spark1.3-AstraVanguard3D/)
-
 </div>
 
 ---
