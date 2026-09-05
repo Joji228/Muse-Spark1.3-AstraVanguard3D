@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunwarden: Solaris Rescue 3D v0.2.0 — Superhero Platformer</title>
+<title>Sunwarden: Solaris Rescue 3D v0.3.0 — Superhero Platformer</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; overflow:hidden; background:#020617; font-family:'Segoe UI',system-ui,Arial,sans-serif; }
@@ -73,8 +73,12 @@
   /* hint */
   #hint { position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
     background:rgba(2,6,23,.55); padding:7px 16px; border-radius:20px; font-size:12px; color:#e2e8f0;
-    white-space:nowrap; pointer-events:none; backdrop-filter:blur(6px); }
+    max-width:96vw; text-align:center; pointer-events:none; backdrop-filter:blur(6px); }
   #hint b { color:#ffd700; }
+  /* contextual action prompt (rubble etc.) sits just above the hint */
+  #prompt { position:absolute; bottom:52px; left:50%; transform:translateX(-50%);
+    background:rgba(22,163,74,.85); border:1px solid #ffd700; color:#fff; font-weight:800; font-size:13px;
+    letter-spacing:1px; padding:6px 18px; border-radius:20px; pointer-events:none; display:none; }
   #title-tag { position:absolute; bottom:12px; left:16px; color:#ffd700; font-weight:900; letter-spacing:2px;
     font-size:14px; text-shadow:0 2px 0 #7f1d1d; pointer-events:none; }
   /* overlays */
@@ -197,9 +201,10 @@
   <div id="banner" aria-live="polite"></div>
   <div id="cross"><div class="ring"></div></div>
   <div id="floaters"></div>
+  <div id="prompt"></div>
   <div id="hint"><b>Left-click (hold)</b> heat vision &nbsp;•&nbsp; <b>Mouse</b> steers camera &nbsp;•&nbsp; <b>Wheel-click</b> lock target &nbsp;•&nbsp; <b>WASD</b> move &nbsp;•&nbsp; <b>Space</b> hold to <b>FLY</b> (<b>C</b> dives) &nbsp;•&nbsp; <b>Q</b> grab rubble, <b>J</b>/click to throw &nbsp;•&nbsp; <b>Shift</b> ⚡ hyperspeed &nbsp;•&nbsp; <b>P</b> menu</div>
   <div id="god-badge">⭐ GOD MODE ⭐</div>
-  <div id="title-tag">☀ SUNWARDEN: SOLARIS RESCUE 3D <span style="opacity:.65">v0.2.0</span></div>
+  <div id="title-tag">☀ SUNWARDEN: SOLARIS RESCUE 3D <span style="opacity:.65">v0.3.0</span></div>
   <div id="touch">
     <div class="tgroup" id="tMove">
       <button type="button" class="tbtn" id="tF" aria-label="Move forward">▲</button><button type="button" class="tbtn" id="tL" aria-label="Move left">◀</button><button type="button" class="tbtn" id="tB" aria-label="Move back">▼</button><button type="button" class="tbtn" id="tR" aria-label="Move right">▶</button>
@@ -266,7 +271,7 @@ if(typeof THREE==='undefined'){ document.getElementById('err').style.display='fl
 
 /* ================= CONFIG ================= */
 var WORLD_LEN=460, GROUND_Y=0;
-var STEP=1/60, GRAV=-58, MOVE_SPEED=13, AIR_CTRL=0.55, JUMP_V=19, MAX_FALL=-42;
+var STEP=1/60, GRAV=-58, MOVE_SPEED=13, JUMP_V=19, MAX_FALL=-42;
 var FLY_MAX_UP=12, FLY_DRAIN=3.0, FLY_HOVER_DRAIN=1.3, FLY_DIVE_DRAIN=1.8;
 var FLIGHT_REGEN=30, HEAT_REGEN=26, HEAT_AIR_REGEN=10;
 var LASER_DRAIN=20, LASER_DPS=46;
@@ -2497,7 +2502,7 @@ function updateCamera(dt){
   if(boomLen>0.01){
     _v1.multiplyScalar(1/boomLen);
     var hitT=rayWorld(P.pos.x,hy,P.pos.z,_v1.x,_v1.y,_v1.z,boomLen,hy-1.2);
-    var wantDist=(hitT>=0)?Math.max(3,hitT-1.2):boomLen;
+    var wantDist=(hitT>=0)?Math.max(3.5,hitT-1.2):boomLen;
     camDist+= (wantDist-camDist)*Math.min(1,((wantDist<camDist)?12:3)*dt);
     _want.set(P.pos.x+_v1.x*camDist,hy+_v1.y*camDist,P.pos.z+_v1.z*camDist);
   }
@@ -2553,6 +2558,7 @@ var progFill=document.getElementById('prog-fill');
 var hudTick=0;
 var hpMeterEl=document.getElementById('hp-meter'), flMeterEl=document.getElementById('fl-meter');
 var htMeterEl=document.getElementById('ht-meter'), boMeterEl=document.getElementById('bo-meter');
+var promptEl=document.getElementById('prompt');
 // change-gated DOM writes: layout/style work only happens when text changes
 function setText(el,txt){ if(el._t!==txt){ el._t=txt; el.textContent=txt; } }
 function setW(el,pct){ var w=(Math.round(pct*10)/10)+'%'; if(el._w!==w){ el._w=w; el.style.width=w; } }
@@ -2629,6 +2635,20 @@ function frame(now){
   updateCamera(delta);
   updateHUD();
   updateFloaters(delta);
+  // contextual rubble prompt: grab when near a chunk, throw while carrying
+  var promptTxt='';
+  if(state==='play'&&!paused){
+    if(carrying) promptTxt='THROW: J / CLICK';
+    else {
+      for(var ri=0;ri<rubble.length;ri++){ var rr=rubble[ri];
+        if(rr.state!=='ground') continue;
+        var rdx=rr.x-P.pos.x, rdy=rr.y-(P.pos.y+1), rdz=rr.z-P.pos.z;
+        if(rdx*rdx+rdy*rdy+rdz*rdz<20.25){ promptTxt='Q GRAB'; break; }
+      }
+    }
+  }
+  if(promptTxt){ if(promptEl.style.display!=='block') promptEl.style.display='block'; setText(promptEl,promptTxt); }
+  else if(promptEl.style.display!=='none') promptEl.style.display='none';
   // compass: nearest unrescued citizen, floating above the hero
   var nearC=null, nd=1e18, ci;
   if(state==='play'){
@@ -2682,7 +2702,7 @@ window.__game={
     fly:!!P.fly, muted:muted, god:!!settings.god,
     x:+P.pos.x.toFixed(1), y:+P.pos.y.toFixed(1), z:+P.pos.z.toFixed(1),
     rescued:rescued, bossAlive:bossAlive(), bossHp:(function(){var b=bossObj();return b?Math.max(0,Math.ceil(b.hp)):0;})(),
-    bossIntro:bossIntro, lives:lives, deaths:deaths, score:score,
+    bossIntro:bossIntro, lives:lives, deaths:deaths, score:score, t:+gameTime.toFixed(1),
     open:(rescued>=5&&!bossAlive()), qLevel:qLevel,
     foes:(function(){var n=0;for(var i=0;i<enemies.length;i++)if(enemies[i].alive)n++;return n;})(),
     pt:+P.punchT.toFixed(2), pcd:+P.punchCD.toFixed(2),
